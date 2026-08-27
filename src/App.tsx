@@ -13,6 +13,7 @@ import {
 } from './utils/storage';
 import { INITIAL_SKILL_META } from './data/initialData';
 import { Employee, UserSession, AppFiltersState } from './types';
+import { getSupabaseConfig, fetchSupabaseEmployees } from './utils/syncService';
 
 // Components
 import { LandingPage } from './components/LandingPage';
@@ -143,13 +144,31 @@ export default function App() {
     }
   }, [isDarkMode]);
 
-  // Check initial session on boot
+  // Check initial session & auto-sync from Supabase Cloud on boot
   useEffect(() => {
     const session = getSession();
     if (session) {
       setCurrentUser(session);
-      // We can stay on landing or go to app if requested
     }
+
+    // Auto-fetch data from Supabase Cloud if configured
+    const autoSyncFromCloud = async () => {
+      const config = getSupabaseConfig();
+      if (config.url && config.anonKey) {
+        try {
+          const res = await fetchSupabaseEmployees(config);
+          if (res.success && res.data && res.data.length > 0) {
+            setEmployees(res.data);
+            saveStoredEmployees(res.data);
+            console.log(`[Cloud Sync] Otomatis memuat ${res.data.length} karyawan dari Supabase Cloud.`);
+          }
+        } catch (err) {
+          console.warn('[Cloud Sync] Gagal sinkronisasi otomatis latar belakang:', err);
+        }
+      }
+    };
+
+    autoSyncFromCloud();
   }, []);
 
   // Sync if postMessage received from parent window (e.g. GitHub Pages / GAS iframe wrapper)

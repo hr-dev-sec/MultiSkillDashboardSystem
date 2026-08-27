@@ -40,16 +40,23 @@ export interface SchemaFieldDoc {
 
 const SUPABASE_CONFIG_KEY = 'msm_supabase_config_v1';
 
-// Default Supabase Config
+// Default Supabase Config (with automatic fallback to Vite Environment Variables)
 export function getSupabaseConfig(): SupabaseConfig {
+  let savedConfig: Partial<SupabaseConfig> = {};
   try {
     const raw = localStorage.getItem(SUPABASE_CONFIG_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) savedConfig = JSON.parse(raw);
   } catch (_) {}
+
+  // Fallback to VITE_ environment variables if available
+  const envUrl = (import.meta as any).env?.VITE_SUPABASE_URL || '';
+  const envKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';
+  const envTable = (import.meta as any).env?.VITE_SUPABASE_TABLE || 'employees_multi_skill';
+
   return {
-    url: '',
-    anonKey: '',
-    tableName: 'employees_multi_skill'
+    url: savedConfig.url || envUrl || '',
+    anonKey: savedConfig.anonKey || envKey || '',
+    tableName: savedConfig.tableName || envTable || 'employees_multi_skill'
   };
 }
 
