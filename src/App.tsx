@@ -160,6 +160,15 @@ export default function App() {
           if (res.success && res.data && res.data.length > 0) {
             setEmployees(res.data);
             saveStoredEmployees(res.data);
+            
+            // Otomatis sesuaikan filter periode aktif dengan data terbaru yang ditarik dari Cloud
+            const defaultPeriod = getDefaultFilterPeriod(res.data);
+            setFilters((prev) => ({
+              ...prev,
+              tahun: defaultPeriod.tahun,
+              bulan: defaultPeriod.bulan
+            }));
+            
             console.log(`[Cloud Sync] Otomatis memuat ${res.data.length} karyawan dari Supabase Cloud.`);
           }
         } catch (err) {
