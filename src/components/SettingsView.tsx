@@ -3,6 +3,7 @@ import { Employee, PeriodsData, UserSession, AppFiltersState } from '../types';
 import { BULAN_LABELS } from '../data/initialData';
 import { changePassword, updateUserProfile, duplicatePeriod, exportDatabaseCsv, buildReportPdfDoc, AJINOMOTO_LOGO_URL } from '../utils/storage';
 import { DEFAULT_GOOGLE_SHEET_URL, getSavedGoogleSheetUrl } from '../utils/syncService';
+import { SmtpConfig, getSavedSmtpConfig, saveSmtpConfig, testSmtpConnection } from '../utils/emailReportService';
 import { ExportExcelConfirmModal } from './ExportExcelConfirmModal';
 import { ExportPdfModal } from './ExportPdfModal';
 import { ConfirmationModal, ConfirmationVariant } from './ConfirmationModal';
@@ -113,6 +114,26 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   // 4. Excel Download Confirmation Modal State
   const [isExcelModalOpen, setIsExcelModalOpen] = useState(false);
   const [exportToast, setExportToast] = useState<string | null>(null);
+
+  // 5. SMTP Server Configuration State
+  const [smtpSettings, setSmtpSettings] = useState<SmtpConfig>(getSavedSmtpConfig());
+  const [isTestingSmtp, setIsTestingSmtp] = useState(false);
+  const [smtpAlert, setSmtpAlert] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  const handleSmtpSave = (e: React.FormEvent) => {
+    e.preventDefault();
+    saveSmtpConfig(smtpSettings);
+    setSmtpAlert({ type: 'success', message: 'Konfigurasi SMTP server berhasil diperbarui.' });
+    setTimeout(() => setSmtpAlert(null), 4000);
+  };
+
+  const handleTestSmtpConnection = async () => {
+    setIsTestingSmtp(true);
+    setSmtpAlert(null);
+    const res = await testSmtpConnection(smtpSettings);
+    setIsTestingSmtp(false);
+    setSmtpAlert({ type: res.success ? 'success' : 'error', message: res.message });
+  };
 
   // Handle Change Password
   const handlePasswordSubmit = (e: React.FormEvent) => {
@@ -960,6 +981,186 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             )}
           </div>
         </div>
+      </div>
+
+      {/* ROW 4: PENGATURAN SERVER EMAIL LANGSUNG & SMTP */}
+      <div className="card-elegant p-6 border border-indigo-500/30 bg-gradient-to-br from-white via-white to-indigo-50/20 dark:from-slate-900 dark:via-slate-900 dark:to-indigo-950/20 space-y-4">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div>
+            <p className="eyebrow !text-indigo-600 dark:text-indigo-400 text-[10px] uppercase font-bold tracking-wider mb-1 flex items-center gap-1.5">
+              <i className="fa-solid fa-server text-indigo-600 dark:text-indigo-400"></i> Direct Mail Server &amp; SMTP
+            </p>
+            <h3 className="section-title text-base sm:text-lg mb-1 flex items-center gap-2 text-slate-900 dark:text-white">
+              Konfigurasi Server Pengiriman Email Langsung
+            </h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400 max-w-3xl leading-relaxed">
+              Atur server email untuk pengiriman laporan PDF resmi secara langsung dari sistem ke pimpinan pabrik tanpa perlu membuka aplikasi email eksternal.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={handleTestSmtpConnection}
+              disabled={isTestingSmtp || (!smtpSettings.enabled && !smtpSettings.host)}
+              className="px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+            >
+              {isTestingSmtp ? (
+                <>
+                  <span className="w-3 h-3 border-2 border-slate-400 border-t-slate-800 rounded-full animate-spin"></span>
+                  <span>Menguji...</span>
+                </>
+              ) : (
+                <>
+                  <i className="fa-solid fa-plug text-indigo-500 text-[11px]"></i>
+                  <span>Uji Koneksi</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {smtpAlert && (
+          <div
+            className={`p-3 rounded-xl text-xs font-semibold flex items-center gap-2 animate-fadeIn ${
+              smtpAlert.type === 'success'
+                ? 'bg-emerald-50 text-emerald-800 border border-emerald-300 dark:bg-emerald-950/40 dark:text-emerald-300'
+                : 'bg-rose-50 text-rose-800 border border-rose-300 dark:bg-rose-950/40 dark:text-rose-300'
+            }`}
+          >
+            <i className={`fa-solid ${smtpAlert.type === 'success' ? 'fa-circle-check text-emerald-600' : 'fa-circle-exclamation text-rose-600'}`}></i>
+            <span>{smtpAlert.message}</span>
+          </div>
+        )}
+
+        <form onSubmit={handleSmtpSave} className="space-y-4 pt-2">
+          <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 space-y-3">
+            <label className="flex items-center gap-2 cursor-pointer font-bold text-xs text-slate-800 dark:text-slate-200">
+              <input
+                type="checkbox"
+                checked={smtpSettings.enabled}
+                onChange={(e) => setSmtpSettings({ ...smtpSettings, enabled: e.target.checked })}
+                className="rounded text-indigo-600"
+              />
+              <span>Aktifkan Kustomisasi SMTP Server Enterprise (Opsional)</span>
+            </label>
+
+            {smtpSettings.enabled ? (
+              <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-700">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="sm:col-span-2">
+                    <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1">
+                      SMTP Host Server:
+                    </label>
+                    <input
+                      type="text"
+                      value={smtpSettings.host}
+                      onChange={(e) => setSmtpSettings({ ...smtpSettings, host: e.target.value })}
+                      placeholder="mail.ajinomoto.co.id / smtp.office365.com"
+                      className="input-elegant w-full px-3 py-2 text-xs font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1">
+                      Port:
+                    </label>
+                    <input
+                      type="number"
+                      value={smtpSettings.port}
+                      onChange={(e) => setSmtpSettings({ ...smtpSettings, port: Number(e.target.value) || 587 })}
+                      placeholder="587 / 465 / 25"
+                      className="input-elegant w-full px-3 py-2 text-xs font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1">
+                      SMTP User:
+                    </label>
+                    <input
+                      type="text"
+                      value={smtpSettings.user}
+                      onChange={(e) => setSmtpSettings({ ...smtpSettings, user: e.target.value })}
+                      placeholder="hr.monitoring@ajinomoto.co.id"
+                      className="input-elegant w-full px-3 py-2 text-xs font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1">
+                      SMTP Password:
+                    </label>
+                    <input
+                      type="password"
+                      value={smtpSettings.pass}
+                      onChange={(e) => setSmtpSettings({ ...smtpSettings, pass: e.target.value })}
+                      placeholder="••••••••••••"
+                      className="input-elegant w-full px-3 py-2 text-xs font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1">
+                      Nama Pengirim:
+                    </label>
+                    <input
+                      type="text"
+                      value={smtpSettings.fromName}
+                      onChange={(e) => setSmtpSettings({ ...smtpSettings, fromName: e.target.value })}
+                      placeholder="PT Ajinomoto Indonesia — Mojokerto Factory"
+                      className="input-elegant w-full px-3 py-2 text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1">
+                      Email Pengirim (From Header):
+                    </label>
+                    <input
+                      type="email"
+                      value={smtpSettings.fromEmail}
+                      onChange={(e) => setSmtpSettings({ ...smtpSettings, fromEmail: e.target.value })}
+                      placeholder="noreply@ajinomoto.co.id"
+                      className="input-elegant w-full px-3 py-2 text-xs font-mono"
+                    />
+                  </div>
+                </div>
+
+                <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-600 dark:text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={smtpSettings.secure}
+                    onChange={(e) => setSmtpSettings({ ...smtpSettings, secure: e.target.checked })}
+                    className="rounded text-indigo-600"
+                  />
+                  <span>Gunakan Koneksi SSL/TLS Langsung (Wajib jika Port 465)</span>
+                </label>
+              </div>
+            ) : (
+              <div className="p-3 rounded-xl bg-blue-50/60 dark:bg-blue-950/30 border border-blue-200/60 dark:border-blue-900/60 text-xs text-slate-600 dark:text-slate-300 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <i className="fa-solid fa-circle-check text-blue-600"></i>
+                  <span>Sistem aktif menggunakan <strong>Direct System Dispatcher</strong> bawaan.</span>
+                </div>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 font-bold">
+                  Siap Kirim
+                </span>
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-end">
+            <button
+              type="submit"
+              className="btn-navy px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 shadow-sm cursor-pointer hover:opacity-95"
+            >
+              <i className="fa-solid fa-floppy-disk"></i>
+              <span>Simpan Pengaturan Email</span>
+            </button>
+          </div>
+        </form>
       </div>
 
       {/* ================= MODAL: PREVIEW & EXPORT LAPORAN PDF RESMI (GAS FORMAT) ================= */}

@@ -6,9 +6,16 @@ import { computeDashboardStats } from '../utils/storage';
 import { ConfirmationModal } from './ConfirmationModal';
 import {
   EmailCustomContent,
+  EmailHistoryItem,
+  SmtpConfig,
   getDefaultEmailContent,
   buildMultiSkillEmailDraft,
   sendMultiSkillEmailReport,
+  getSavedSmtpConfig,
+  saveSmtpConfig,
+  testSmtpConnection,
+  getEmailHistory,
+  clearEmailHistory,
   getSavedEmailWebhookUrl,
   saveEmailWebhookUrl
 } from '../utils/emailReportService';
@@ -41,14 +48,16 @@ export const ExportPdfModal: React.FC<ExportPdfModalProps> = ({
   const [signerName, setSignerName] = useState(currentUser.name || 'Mahmud Nurdiansyah');
   const [signerRole, setSignerRole] = useState(currentUser.role || 'HR Development Specialist');
 
-  // Preview tab state: 'page1' | 'page2' | 'page3' | 'roster' | 'email'
-  const [activePreviewPage, setActivePreviewPage] = useState<'page1' | 'page2' | 'page3' | 'roster' | 'email'>('page1');
+  // Preview tab state: 'page1' | 'page2' | 'page3' | 'email' | 'history' | 'smtp'
+  const [activePreviewPage, setActivePreviewPage] = useState<'page1' | 'page2' | 'page3' | 'email' | 'history' | 'smtp'>('page1');
 
   // Email Drawer / Editor state
   const [isEmailRowOpen, setIsEmailRowOpen] = useState(false);
   const [isSendingEmail, setIsSendingEmail] = useState(false);
-  const [emailAlert, setEmailAlert] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [emailSendingStep, setEmailSendingStep] = useState<string>('');
+  const [emailAlert, setEmailAlert] = useState<{ type: 'success' | 'error'; message: string; previewUrl?: string } | null>(null);
   const [copiedEmailText, setCopiedEmailText] = useState(false);
+  const [showAdvancedHeaders, setShowAdvancedHeaders] = useState(false);
   
   // Editable Email Content
   const [emailContent, setEmailContent] = useState<EmailCustomContent>(() =>
@@ -59,24 +68,38 @@ export const ExportPdfModal: React.FC<ExportPdfModalProps> = ({
     })
   );
 
-  // Email view sub-mode: 'edit' | 'visual_preview' | 'plain_preview'
-  const [emailViewMode, setEmailViewMode] = useState<'edit' | 'visual_preview' | 'plain_preview'>('visual_preview');
+  // Email view sub-mode: 'visual_preview' | 'edit' | 'plain_preview'
+  const [emailViewMode, setEmailViewMode] = useState<'visual_preview' | 'edit' | 'plain_preview'>('visual_preview');
+
+  // SMTP Settings State
+  const [smtpConfig, setSmtpConfig] = useState<SmtpConfig>(getSavedSmtpConfig());
+  const [isTestingSmtp, setIsTestingSmtp] = useState(false);
+  const [smtpTestResult, setSmtpTestResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  // Dispatch History
+  const [dispatchHistory, setDispatchHistory] = useState<EmailHistoryItem[]>([]);
 
   // Webhook configuration
   const [emailWebhookUrl, setEmailWebhookUrlState] = useState(getSavedEmailWebhookUrl());
-  const [showWebhookConfig, setShowWebhookConfig] = useState(false);
 
-  // Loading generation state
+  // Loading generation state for PDF download
   const [isGenerating, setIsGenerating] = useState(false);
 
   // PDF Generation Error Modal State
   const [errorModalMsg, setErrorModalMsg] = useState<string | null>(null);
 
+  // Load email history and SMTP config on modal open
+  useEffect(() => {
+    if (isOpen) {
+      setDispatchHistory(getEmailHistory());
+      setSmtpConfig(getSavedSmtpConfig());
+    }
+  }, [isOpen]);
+
   // Sync email default content when filters or scope change
   useEffect(() => {
     const targetData = scope === 'filtered' ? filteredEmployees : allEmployees;
     const defaults = getDefaultEmailContent({ targetData, filters, toEmail: emailContent.toEmail });
-    // Update only if user hasn't heavily modified, or keep user edits
     setEmailContent((prev) => ({
       ...prev,
       toEmail: prev.toEmail || defaults.toEmail
@@ -117,11 +140,10 @@ export const ExportPdfModal: React.FC<ExportPdfModalProps> = ({
       await navigator.clipboard.writeText(emailDraftPayload.plainTextBody);
       setCopiedEmailText(true);
       setTimeout(() => setCopiedEmailText(false), 2500);
-    } catch (_) {
-      // Fallback
-    }
+    } catch (_) {}
   };
 
+  // Unduh PDF ke komputer lokal
   const handleDownloadPdf = () => {
     setIsGenerating(true);
     setTimeout(() => {
@@ -155,10 +177,11 @@ export const ExportPdfModal: React.FC<ExportPdfModalProps> = ({
         setIsGenerating(false);
         setErrorModalMsg(err?.message || 'Terjadi kesalahan sistem saat menyusun dokumen PDF.');
       }
-    }, 400);
+    }, 350);
   };
 
-  const handleSendEmail = async () => {
+  // KIRIM EMAIL LANGSUNG DARI SISTEM (Disertai Attachment PDF Otomatis)
+  const handleSendEmailDirect = async () => {
     setEmailAlert(null);
     if (!emailContent.toEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailContent.toEmail.trim())) {
       setEmailAlert({ type: 'error', message: 'Masukkan alamat email penerima / pimpinan yang valid.' });
@@ -166,30 +189,133 @@ export const ExportPdfModal: React.FC<ExportPdfModalProps> = ({
     }
 
     setIsSendingEmail(true);
-    const payload = buildMultiSkillEmailDraft({
-      targetData,
-      filters,
-      currentUser,
-      customContent: emailContent
-    });
+    setEmailSendingStep('Menyusun dokumen PDF resmi 3 halaman...');
 
-    const res = await sendMultiSkillEmailReport(payload);
-    setIsSendingEmail(false);
-
-    if (res.success) {
-      setEmailAlert({
-        type: 'success',
-        message: res.message
+    try {
+      // Step 1: Generate PDF in memory
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      const pdfResult = generateMultiSkillReportPdf({
+        scope,
+        filteredEmployees,
+        allEmployees,
+        filters,
+        currentUser,
+        reportType,
+        orientation,
+        approvers: {
+          preparedBy: { name: signerName, title: signerRole }
+        }
       });
-      try {
-        confetti({ particleCount: 50, spread: 60, origin: { y: 0.7 } });
-      } catch (_) {}
-    } else {
+
+      // Extract Base64 Data URI from jsPDF
+      const pdfBase64 = pdfResult.doc.output('datauristring');
+      const pdfFileName = pdfResult.filename;
+
+      // Step 2: Build Payload & connect to system dispatch API
+      setEmailSendingStep('Mengirim laporan resmi langsung via server...');
+      const payload = buildMultiSkillEmailDraft({
+        targetData,
+        filters,
+        currentUser,
+        customContent: emailContent
+      });
+
+      // Step 3: Send directly from backend
+      const res = await sendMultiSkillEmailReport(payload, pdfBase64, pdfFileName);
+      setIsSendingEmail(false);
+      setEmailSendingStep('');
+
+      // Refresh history list
+      setDispatchHistory(getEmailHistory());
+
+      if (res.success) {
+        setEmailAlert({
+          type: 'success',
+          message: res.message,
+          previewUrl: res.previewUrl
+        });
+        try {
+          confetti({ particleCount: 70, spread: 80, origin: { y: 0.6 } });
+        } catch (_) {}
+      } else {
+        setEmailAlert({
+          type: 'error',
+          message: res.message
+        });
+      }
+    } catch (err: any) {
+      setIsSendingEmail(false);
+      setEmailSendingStep('');
       setEmailAlert({
         type: 'error',
-        message: res.message
+        message: `Gagal mengirim email: ${err?.message || 'Terjadi gangguan internal pada sistem.'}`
       });
     }
+  };
+
+  // Preset SMTP Handlers
+  const handleApplySmtpPreset = (preset: 'direct' | 'ajinomoto' | 'office365' | 'gmail') => {
+    if (preset === 'direct') {
+      const updated: SmtpConfig = {
+        enabled: false,
+        host: '',
+        port: 587,
+        secure: false,
+        user: '',
+        pass: '',
+        fromName: 'Multi-Skill Monitoring — Ajinomoto Mojokerto Factory',
+        fromEmail: 'noreply@ajinomoto.co.id'
+      };
+      setSmtpConfig(updated);
+      saveSmtpConfig(updated);
+    } else if (preset === 'ajinomoto') {
+      const updated: SmtpConfig = {
+        enabled: true,
+        host: 'mail.ajinomoto.co.id',
+        port: 587,
+        secure: false,
+        user: 'hr.monitoring@ajinomoto.co.id',
+        pass: '',
+        fromName: 'PT Ajinomoto Indonesia — Mojokerto Factory',
+        fromEmail: 'hr.monitoring@ajinomoto.co.id'
+      };
+      setSmtpConfig(updated);
+      saveSmtpConfig(updated);
+    } else if (preset === 'office365') {
+      const updated: SmtpConfig = {
+        enabled: true,
+        host: 'smtp.office365.com',
+        port: 587,
+        secure: false,
+        user: currentUser.email || 'hr.admin@ajinomoto.co.id',
+        pass: '',
+        fromName: 'HR Multi-Skill Monitoring System',
+        fromEmail: currentUser.email || 'hr.admin@ajinomoto.co.id'
+      };
+      setSmtpConfig(updated);
+      saveSmtpConfig(updated);
+    } else if (preset === 'gmail') {
+      const updated: SmtpConfig = {
+        enabled: true,
+        host: 'smtp.gmail.com',
+        port: 465,
+        secure: true,
+        user: currentUser.email || 'mahmudnurdiansyah4@gmail.com',
+        pass: '',
+        fromName: 'Ajinomoto Multi-Skill Monitoring',
+        fromEmail: currentUser.email || 'mahmudnurdiansyah4@gmail.com'
+      };
+      setSmtpConfig(updated);
+      saveSmtpConfig(updated);
+    }
+  };
+
+  const handleTestSmtp = async () => {
+    setIsTestingSmtp(true);
+    setSmtpTestResult(null);
+    const res = await testSmtpConnection(smtpConfig);
+    setIsTestingSmtp(false);
+    setSmtpTestResult(res);
   };
 
   return (
@@ -198,21 +324,18 @@ export const ExportPdfModal: React.FC<ExportPdfModalProps> = ({
         {/* Modal Header */}
         <div className="px-5 sm:px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0 bg-gradient-to-r from-slate-50 via-white to-amber-50/30 dark:from-slate-900 dark:via-slate-900 dark:to-slate-800/50">
           <div className="flex items-center gap-3">
-            <div
-              className="w-10 h-10 rounded-2xl flex items-center justify-center text-white shadow-md"
-              style={{ background: 'linear-gradient(135deg, #0E2340, #16345E)' }}
-            >
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-[#0E2340] to-[#16345E] text-white flex items-center justify-center shadow-md">
               <i className="fa-solid fa-file-pdf text-amber-400 text-lg"></i>
             </div>
             <div>
               <h2 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                <span>Pratinjau &amp; Distribusi Laporan Multi-Skill</span>
+                <span>Laporan Multi-Skill Monitoring &amp; Pengiriman Email</span>
                 <span className="badge-pill bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 text-[11px] px-2 py-0.5 font-bold">
-                  E-SIGN OFFICIAL
+                  DIRECT SYSTEM DISPATCH
                 </span>
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                PT Ajinomoto Indonesia &bull; Mojokerto Factory &bull; Format 3 Halaman Eksekutif &amp; Redaksional Email
+                PT Ajinomoto Indonesia &bull; Mojokerto Factory &bull; Format 3 Halaman Resmi &amp; Pengiriman Email Langsung
               </p>
             </div>
           </div>
@@ -339,21 +462,24 @@ export const ExportPdfModal: React.FC<ExportPdfModalProps> = ({
               </div>
             </div>
 
-            {/* Report Structure Information */}
-            <div className="p-3.5 rounded-2xl bg-blue-50/70 dark:bg-blue-950/30 border border-blue-200/80 dark:border-blue-900/60 text-xs space-y-1.5 text-slate-700 dark:text-slate-300">
-              <p className="font-bold text-[#0E2340] dark:text-blue-300 flex items-center gap-1.5">
-                <i className="fa-solid fa-layer-group text-blue-600"></i>
-                Struktur Dokumen Laporan Resmi:
+            {/* Direct Email Server Status Indicator */}
+            <div className="p-3.5 rounded-2xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200/80 dark:border-emerald-900/60 text-xs space-y-1.5 text-slate-700 dark:text-slate-300">
+              <div className="flex items-center justify-between">
+                <p className="font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5">
+                  <i className="fa-solid fa-paper-plane text-emerald-600"></i>
+                  Pengiriman Email Langsung:
+                </p>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-200 text-emerald-900 dark:bg-emerald-900 dark:text-emerald-200">
+                  {smtpConfig.enabled ? 'Custom SMTP' : 'Direct Server'}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-600 dark:text-slate-400">
+                Sistem mengirimkan email beserta <strong>lampiran file PDF laporan resmi</strong> secara langsung ke email pimpinan tanpa perlu membuka Outlook atau Gmail.
               </p>
-              <ul className="list-disc list-inside space-y-0.5 text-[11.5px] text-slate-600 dark:text-slate-400 pl-1">
-                <li><strong>Halaman 1:</strong> Kop Surat Banner Navy, Rekap KPI, Breakdown Divisi &amp; Dept.</li>
-                <li><strong>Halaman 2:</strong> Rekapitulasi per Grade &amp; Kategori Job Position.</li>
-                <li><strong>Halaman 3:</strong> Lembar Pengesahan Validasi Digital E-Sign HR Management.</li>
-              </ul>
             </div>
           </div>
 
-          {/* Right Column: Interactive Live Preview & Email Editor (7 Cols) */}
+          {/* Right Column: Interactive Live Preview, Email Editor, SMTP & Logs (7 Cols) */}
           <div className="lg:col-span-7 p-5 flex flex-col min-h-0 bg-white dark:bg-slate-900">
             {/* Navigation Tabs */}
             <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800 shrink-0 gap-2 flex-wrap">
@@ -393,10 +519,7 @@ export const ExportPdfModal: React.FC<ExportPdfModalProps> = ({
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    setActivePreviewPage('email');
-                    setIsEmailRowOpen(true);
-                  }}
+                  onClick={() => setActivePreviewPage('email')}
                   className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
                     activePreviewPage === 'email'
                       ? 'bg-[#0E2340] text-amber-300 shadow-sm'
@@ -404,7 +527,33 @@ export const ExportPdfModal: React.FC<ExportPdfModalProps> = ({
                   }`}
                 >
                   <i className="fa-regular fa-envelope text-[11px]"></i>
-                  <span>Redaksional Email</span>
+                  <span>Kirim Email Langsung</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActivePreviewPage('smtp')}
+                  className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1 ${
+                    activePreviewPage === 'smtp'
+                      ? 'bg-slate-800 text-amber-300'
+                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                  }`}
+                  title="Pengaturan SMTP & Server Email"
+                >
+                  <i className="fa-solid fa-gear text-[10px]"></i>
+                  <span>SMTP</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActivePreviewPage('history')}
+                  className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1 ${
+                    activePreviewPage === 'history'
+                      ? 'bg-slate-800 text-amber-300'
+                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                  }`}
+                  title="Riwayat Pengiriman Email"
+                >
+                  <i className="fa-solid fa-clock-rotate-left text-[10px]"></i>
+                  <span>Log ({dispatchHistory.length})</span>
                 </button>
               </div>
 
@@ -426,7 +575,7 @@ export const ExportPdfModal: React.FC<ExportPdfModalProps> = ({
                       emailViewMode === 'edit' ? 'bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 font-bold' : 'text-slate-500 hover:text-slate-700'
                     }`}
                   >
-                    <i className="fa-solid fa-pen-to-square text-[10px] mr-1"></i>Edit
+                    <i className="fa-solid fa-pen-to-square text-[10px] mr-1"></i>Edit Teks
                   </button>
                   <button
                     type="button"
@@ -441,9 +590,340 @@ export const ExportPdfModal: React.FC<ExportPdfModalProps> = ({
               )}
             </div>
 
-            {/* Preview Sheet Canvas / Email Viewer */}
-            <div className="flex-1 overflow-y-auto mt-3 p-4 rounded-2xl bg-slate-100/80 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 flex justify-center">
-              {activePreviewPage === 'email' ? (
+            {/* Preview Sheet Canvas / Email Viewer / SMTP / Logs */}
+            <div className="flex-1 overflow-y-auto mt-3 p-3 sm:p-4 rounded-2xl bg-slate-100/80 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 flex justify-center">
+              {activePreviewPage === 'smtp' ? (
+                /* SMTP CONFIGURATION PANEL */
+                <div className="w-full max-w-xl space-y-4 animate-fadeIn">
+                  <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-4 text-xs">
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
+                      <div>
+                        <h4 className="font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2 text-sm">
+                          <i className="fa-solid fa-server text-indigo-600"></i>
+                          Konfigurasi Server Email &amp; SMTP
+                        </h4>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                          Atur server relay internal Ajinomoto atau gunakan direct built-in system dispatcher.
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Presets */}
+                    <div className="space-y-1.5">
+                      <label className="block font-bold text-slate-700 dark:text-slate-300">Pilihan Cepat Server (Presets):</label>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => handleApplySmtpPreset('direct')}
+                          className={`p-2 rounded-xl text-left border text-[11px] font-bold cursor-pointer transition ${
+                            !smtpConfig.enabled
+                              ? 'bg-blue-50 border-blue-500 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300'
+                              : 'border-slate-200 hover:bg-slate-50 dark:border-slate-700'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span>Direct System</span>
+                            {!smtpConfig.enabled && <i className="fa-solid fa-check text-blue-600"></i>}
+                          </div>
+                          <span className="text-[9.5px] font-normal text-slate-500 block mt-0.5">Built-in Dispatch</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleApplySmtpPreset('ajinomoto')}
+                          className={`p-2 rounded-xl text-left border text-[11px] font-bold cursor-pointer transition ${
+                            smtpConfig.enabled && smtpConfig.host.includes('ajinomoto')
+                              ? 'bg-amber-50 border-amber-500 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
+                              : 'border-slate-200 hover:bg-slate-50 dark:border-slate-700'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span>Ajinomoto Relay</span>
+                            {smtpConfig.enabled && smtpConfig.host.includes('ajinomoto') && <i className="fa-solid fa-check text-amber-600"></i>}
+                          </div>
+                          <span className="text-[9.5px] font-normal text-slate-500 block mt-0.5">mail.ajinomoto.co.id</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleApplySmtpPreset('office365')}
+                          className={`p-2 rounded-xl text-left border text-[11px] font-bold cursor-pointer transition ${
+                            smtpConfig.enabled && smtpConfig.host.includes('office365')
+                              ? 'bg-indigo-50 border-indigo-500 text-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300'
+                              : 'border-slate-200 hover:bg-slate-50 dark:border-slate-700'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span>Office 365</span>
+                            {smtpConfig.enabled && smtpConfig.host.includes('office365') && <i className="fa-solid fa-check text-indigo-600"></i>}
+                          </div>
+                          <span className="text-[9.5px] font-normal text-slate-500 block mt-0.5">smtp.office365.com</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleApplySmtpPreset('gmail')}
+                          className={`p-2 rounded-xl text-left border text-[11px] font-bold cursor-pointer transition ${
+                            smtpConfig.enabled && smtpConfig.host.includes('gmail')
+                              ? 'bg-rose-50 border-rose-500 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300'
+                              : 'border-slate-200 hover:bg-slate-50 dark:border-slate-700'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span>Gmail / Google</span>
+                            {smtpConfig.enabled && smtpConfig.host.includes('gmail') && <i className="fa-solid fa-check text-rose-600"></i>}
+                          </div>
+                          <span className="text-[9.5px] font-normal text-slate-500 block mt-0.5">smtp.gmail.com</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-700 space-y-3">
+                      <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-800 dark:text-slate-200">
+                        <input
+                          type="checkbox"
+                          checked={smtpConfig.enabled}
+                          onChange={(e) => {
+                            const updated = { ...smtpConfig, enabled: e.target.checked };
+                            setSmtpConfig(updated);
+                            saveSmtpConfig(updated);
+                          }}
+                          className="rounded text-indigo-600"
+                        />
+                        <span>Gunakan Custom Server SMTP untuk Pengiriman Email</span>
+                      </label>
+
+                      {smtpConfig.enabled ? (
+                        <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-700">
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                            <div className="sm:col-span-2">
+                              <label className="block text-[11px] font-semibold text-slate-500 mb-1">SMTP Host Server:</label>
+                              <input
+                                type="text"
+                                value={smtpConfig.host}
+                                onChange={(e) => setSmtpConfig({ ...smtpConfig, host: e.target.value })}
+                                placeholder="misal: smtp.office365.com / mail.ajinomoto.co.id"
+                                className="input-elegant w-full px-3 py-1.5 text-xs font-mono"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-semibold text-slate-500 mb-1">Port:</label>
+                              <input
+                                type="number"
+                                value={smtpConfig.port}
+                                onChange={(e) => setSmtpConfig({ ...smtpConfig, port: Number(e.target.value) || 587 })}
+                                placeholder="587 / 465 / 25"
+                                className="input-elegant w-full px-3 py-1.5 text-xs font-mono"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                            <div>
+                              <label className="block text-[11px] font-semibold text-slate-500 mb-1">SMTP Username / Email:</label>
+                              <input
+                                type="text"
+                                value={smtpConfig.user}
+                                onChange={(e) => setSmtpConfig({ ...smtpConfig, user: e.target.value })}
+                                placeholder="user@ajinomoto.co.id"
+                                className="input-elegant w-full px-3 py-1.5 text-xs font-mono"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-semibold text-slate-500 mb-1">SMTP Password / App Secret:</label>
+                              <input
+                                type="password"
+                                value={smtpConfig.pass}
+                                onChange={(e) => setSmtpConfig({ ...smtpConfig, pass: e.target.value })}
+                                placeholder="Password atau App Password"
+                                className="input-elegant w-full px-3 py-1.5 text-xs font-mono"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                            <div>
+                              <label className="block text-[11px] font-semibold text-slate-500 mb-1">Nama Pengirim Resmi (Sender Name):</label>
+                              <input
+                                type="text"
+                                value={smtpConfig.fromName}
+                                onChange={(e) => setSmtpConfig({ ...smtpConfig, fromName: e.target.value })}
+                                placeholder="PT Ajinomoto Indonesia — Mojokerto Factory"
+                                className="input-elegant w-full px-3 py-1.5 text-xs"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-semibold text-slate-500 mb-1">Alamat Email Pengirim (From):</label>
+                              <input
+                                type="email"
+                                value={smtpConfig.fromEmail}
+                                onChange={(e) => setSmtpConfig({ ...smtpConfig, fromEmail: e.target.value })}
+                                placeholder="noreply@ajinomoto.co.id"
+                                className="input-elegant w-full px-3 py-1.5 text-xs font-mono"
+                              />
+                            </div>
+                          </div>
+
+                          <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-700 dark:text-slate-300">
+                            <input
+                              type="checkbox"
+                              checked={smtpConfig.secure}
+                              onChange={(e) => setSmtpConfig({ ...smtpConfig, secure: e.target.checked })}
+                              className="rounded text-indigo-600"
+                            />
+                            <span>Gunakan SSL/TLS Langsung (Centang jika Port 465)</span>
+                          </label>
+                        </div>
+                      ) : (
+                        <div className="p-3 rounded-xl bg-blue-50/60 dark:bg-blue-950/40 border border-blue-200/60 dark:border-blue-900/60 text-xs text-slate-600 dark:text-slate-300 space-y-1">
+                          <p className="font-bold text-[#0E2340] dark:text-blue-300 flex items-center gap-1.5">
+                            <i className="fa-solid fa-bolt text-amber-500"></i> Mode Pengiriman Otomatis Aktif
+                          </p>
+                          <p className="text-[11px]">
+                            Sistem secara otomatis mengirim email laporan menggunakan server dispatcher backend terintegrasi dengan tanda bukti pengiriman dan pratinjau pesan.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Test result message */}
+                    {smtpTestResult && (
+                      <div
+                        className={`p-3 rounded-xl text-xs font-semibold flex items-center gap-2 ${
+                          smtpTestResult.success
+                            ? 'bg-emerald-50 text-emerald-800 border border-emerald-300'
+                            : 'bg-rose-50 text-rose-800 border border-rose-300'
+                        }`}
+                      >
+                        <i className={`fa-solid ${smtpTestResult.success ? 'fa-circle-check' : 'fa-circle-exclamation'}`}></i>
+                        <span>{smtpTestResult.message}</span>
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-between pt-2">
+                      <button
+                        type="button"
+                        onClick={handleTestSmtp}
+                        disabled={isTestingSmtp || !smtpConfig.host}
+                        className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-bold text-xs flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                      >
+                        {isTestingSmtp ? (
+                          <>
+                            <span className="w-3.5 h-3.5 border-2 border-slate-400 border-t-slate-800 rounded-full animate-spin"></span>
+                            <span>Menguji Koneksi SMTP...</span>
+                          </>
+                        ) : (
+                          <>
+                            <i className="fa-solid fa-plug text-indigo-500"></i>
+                            <span>Uji Koneksi Server</span>
+                          </>
+                        )}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          saveSmtpConfig(smtpConfig);
+                          setEmailAlert({ type: 'success', message: 'Konfigurasi SMTP berhasil disimpan ke sistem.' });
+                          setActivePreviewPage('email');
+                        }}
+                        className="btn-navy px-5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 cursor-pointer shadow-sm"
+                      >
+                        <i className="fa-solid fa-floppy-disk"></i>
+                        <span>Simpan &amp; Kembali</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : activePreviewPage === 'history' ? (
+                /* EMAIL DISPATCH LOG PANEL */
+                <div className="w-full max-w-xl space-y-3 animate-fadeIn">
+                  <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-3 text-xs">
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
+                      <div>
+                        <h4 className="font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2 text-sm">
+                          <i className="fa-solid fa-clock-rotate-left text-amber-500"></i>
+                          Riwayat Pengiriman Email Langsung dari Sistem
+                        </h4>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                          Catatan log pengiriman laporan beserta lampiran PDF dan ID pesan.
+                        </p>
+                      </div>
+                      {dispatchHistory.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            clearEmailHistory();
+                            setDispatchHistory([]);
+                          }}
+                          className="text-[11px] text-rose-500 hover:underline flex items-center gap-1 cursor-pointer font-semibold"
+                        >
+                          <i className="fa-solid fa-trash-can text-[10px]"></i> Bersihkan Log
+                        </button>
+                      )}
+                    </div>
+
+                    {dispatchHistory.length === 0 ? (
+                      <div className="text-center py-10 space-y-2 text-slate-400">
+                        <i className="fa-solid fa-inbox text-3xl"></i>
+                        <p className="font-semibold text-xs">Belum ada riwayat pengiriman email.</p>
+                        <p className="text-[11px]">Kirim laporan pertama Anda melalui tombol "Kirim Laporan Langsung".</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2 max-h-[380px] overflow-y-auto pr-1">
+                        {dispatchHistory.map((item) => (
+                          <div
+                            key={item.id}
+                            className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-850 space-y-1.5"
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="font-bold text-slate-800 dark:text-slate-100 truncate max-w-[280px]">
+                                {item.to}
+                              </span>
+                              <span
+                                className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                                  item.status === 'SUCCESS'
+                                    ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                    : 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
+                                }`}
+                              >
+                                {item.status === 'SUCCESS' ? '✓ TERKIRIM' : 'GAGAL'}
+                              </span>
+                            </div>
+
+                            <p className="text-[11px] text-slate-600 dark:text-slate-300 line-clamp-1">{item.subject}</p>
+
+                            <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1 border-t border-slate-200/60 dark:border-slate-700/60">
+                              <span>{new Date(item.timestamp).toLocaleString('id-ID')}</span>
+                              <div className="flex items-center gap-2">
+                                {item.hasPdfAttachment && (
+                                  <span className="text-rose-600 dark:text-rose-400 font-bold flex items-center gap-1">
+                                    <i className="fa-solid fa-paperclip text-[9px]"></i> PDF Terlampir
+                                  </span>
+                                )}
+                                <span className="font-mono">{item.method}</span>
+                              </div>
+                            </div>
+
+                            {item.previewUrl && (
+                              <div className="pt-1">
+                                <a
+                                  href={item.previewUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-[10px] text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
+                                >
+                                  <i className="fa-solid fa-arrow-up-right-from-square text-[9px]"></i> Pratinjau Pesan Terkirim (Ethereal)
+                                </a>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : activePreviewPage === 'email' ? (
                 /* EMAIL EDITOR & PREVIEW VIEW */
                 <div className="w-full max-w-xl space-y-3 animate-fadeIn">
                   {emailViewMode === 'edit' ? (
@@ -472,20 +952,54 @@ export const ExportPdfModal: React.FC<ExportPdfModalProps> = ({
                           placeholder="contoh: pimpinan@ajinomoto.co.id, hr.manager@ajinomoto.co.id"
                           className="input-elegant w-full px-3 py-2 text-xs font-semibold"
                         />
-                        <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-                          <span className="text-[10px] text-slate-400 font-semibold">Pilihan Cepat:</span>
-                          {['pimpinan@ajinomoto.co.id', 'hr.manager@ajinomoto.co.id', 'factory.head@ajinomoto.co.id'].map((em) => (
-                            <button
-                              key={em}
-                              type="button"
-                              onClick={() => setEmailContent({ ...emailContent, toEmail: em })}
-                              className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-blue-100 hover:text-blue-700 transition cursor-pointer font-mono"
-                            >
-                              {em}
-                            </button>
-                          ))}
+                        <div className="flex items-center justify-between mt-1.5 flex-wrap gap-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-[10px] text-slate-400 font-semibold">Pilihan Cepat:</span>
+                            {['pimpinan@ajinomoto.co.id', 'hr.manager@ajinomoto.co.id', 'factory.head@ajinomoto.co.id'].map((em) => (
+                              <button
+                                key={em}
+                                type="button"
+                                onClick={() => setEmailContent({ ...emailContent, toEmail: em })}
+                                className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-blue-100 hover:text-blue-700 transition cursor-pointer font-mono"
+                              >
+                                {em}
+                              </button>
+                            ))}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setShowAdvancedHeaders(!showAdvancedHeaders)}
+                            className="text-[10.5px] font-semibold text-blue-600 hover:underline cursor-pointer"
+                          >
+                            {showAdvancedHeaders ? 'Sembunyikan CC/BCC' : '+ Tambah CC / BCC'}
+                          </button>
                         </div>
                       </div>
+
+                      {showAdvancedHeaders && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
+                          <div>
+                            <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">Tembusan (CC):</label>
+                            <input
+                              type="text"
+                              value={emailContent.ccEmail || ''}
+                              onChange={(e) => setEmailContent({ ...emailContent, ccEmail: e.target.value })}
+                              placeholder="hr.staff@ajinomoto.co.id"
+                              className="input-elegant w-full px-2.5 py-1.5 text-xs font-mono"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">Blind Carbon Copy (BCC):</label>
+                            <input
+                              type="text"
+                              value={emailContent.bccEmail || ''}
+                              onChange={(e) => setEmailContent({ ...emailContent, bccEmail: e.target.value })}
+                              placeholder="archive.hr@ajinomoto.co.id"
+                              className="input-elegant w-full px-2.5 py-1.5 text-xs font-mono"
+                            />
+                          </div>
+                        </div>
+                      )}
 
                       <div>
                         <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Subjek Email:</label>
@@ -525,7 +1039,7 @@ export const ExportPdfModal: React.FC<ExportPdfModalProps> = ({
                             onChange={(e) => setEmailContent({ ...emailContent, showStatsTable: e.target.checked })}
                             className="rounded text-blue-600"
                           />
-                          <span>Sertakan Tabel Statistik</span>
+                          <span>Sertakan Tabel Ringkasan KPI</span>
                         </label>
                         <label className="flex items-center gap-2 cursor-pointer select-none text-xs font-semibold text-slate-700 dark:text-slate-200">
                           <input
@@ -534,7 +1048,7 @@ export const ExportPdfModal: React.FC<ExportPdfModalProps> = ({
                             onChange={(e) => setEmailContent({ ...emailContent, showFilterLine: e.target.checked })}
                             className="rounded text-blue-600"
                           />
-                          <span>Sertakan Badge Parameter</span>
+                          <span>Sertakan Badge Filter</span>
                         </label>
                       </div>
 
@@ -600,7 +1114,7 @@ export const ExportPdfModal: React.FC<ExportPdfModalProps> = ({
                           />
                         </div>
                         <div>
-                          <p className="text-[10px] tracking-wider text-slate-200 font-bold uppercase">
+                          <p className="text-[10px] tracking-wider text-amber-300 font-bold uppercase">
                             PT AJINOMOTO INDONESIA — MOJOKERTO FACTORY
                           </p>
                           <p className="text-sm font-extrabold text-white">Laporan Multi-Skill Monitoring</p>
@@ -611,6 +1125,13 @@ export const ExportPdfModal: React.FC<ExportPdfModalProps> = ({
                       <div className="p-5 space-y-3.5 bg-white text-slate-700">
                         <p className="font-semibold text-slate-900">{emailContent.salutation}</p>
                         <p className="leading-relaxed">{emailContent.mainParagraph}</p>
+
+                        {/* Parameter Badge */}
+                        {emailContent.showFilterLine && (
+                          <div className="p-2 text-center rounded-xl border border-dashed border-amber-400 bg-amber-50 text-[11px] text-slate-600 font-semibold">
+                            Periode: {blnStr} {thnStr} | Divisi: {divStr || 'Semua Divisi'} | Dept: {deptStr || 'Semua Departemen'}
+                          </div>
+                        )}
 
                         {/* Summary Table */}
                         {emailContent.showStatsTable && (
@@ -638,11 +1159,14 @@ export const ExportPdfModal: React.FC<ExportPdfModalProps> = ({
                           </div>
                         )}
 
-                        {emailContent.showFilterLine && (
-                          <div className="p-2 text-center rounded-xl border border-dashed border-amber-400 bg-amber-50 text-[11px] text-slate-600 font-semibold">
-                            Periode: {blnStr} {thnStr} | Divisi: {divStr || 'Semua Divisi'} | Dept: {deptStr || 'Semua Departemen'}
+                        {/* Attached PDF Notice */}
+                        <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center gap-2.5 text-emerald-900">
+                          <i className="fa-solid fa-file-pdf text-rose-600 text-lg shrink-0"></i>
+                          <div className="text-[11px]">
+                            <strong className="block font-bold text-slate-900">Lampiran Dokumen PDF Resmi (3 Halaman)</strong>
+                            <span>Laporan lengkap beserta tanda tangan digital HR Management akan dilampirkan otomatis.</span>
                           </div>
-                        )}
+                        </div>
 
                         {emailContent.additionalNotes && (
                           <div className="p-2.5 rounded-lg bg-slate-100 border-l-4 border-[#0E2340] text-[11px] text-slate-700">
@@ -650,54 +1174,42 @@ export const ExportPdfModal: React.FC<ExportPdfModalProps> = ({
                           </div>
                         )}
 
-                        <p className="text-[11px] text-slate-500 leading-relaxed">
-                          Laporan ini dihasilkan secara otomatis oleh sistem pada {new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}, sebagai bagian dari proses monitoring kompetensi multi-skill karyawan di lingkungan Ajinomoto Mojokerto Factory.
-                        </p>
-
-                        <p className="text-xs text-slate-600">{emailContent.closingParagraph}</p>
-
-                        <div className="pt-3 border-t border-slate-200 text-xs leading-relaxed">
-                          <p className="text-slate-500">Hormat kami,</p>
-                          <p className="font-extrabold text-[#0E2340]">Sistem Multi-Skill Monitoring</p>
-                          <p className="text-slate-600">HR Development Section</p>
-                          <p className="text-slate-600">PT Ajinomoto Indonesia — Mojokerto Factory</p>
-                        </div>
-                      </div>
-
-                      {/* Email Footer */}
-                      <div className="p-3 bg-slate-100 border-t border-slate-200 text-[10.5px] text-slate-400 text-center">
-                        Email ini dikirimkan secara otomatis oleh sistem, mohon tidak membalas ke alamat ini.
+                        <p className="leading-relaxed">{emailContent.closingParagraph}</p>
+                        <div className="pt-2 text-slate-800 whitespace-pre-line font-medium">{emailContent.senderSign}</div>
                       </div>
                     </div>
                   )}
                 </div>
               ) : (
-                /* PDF DOCUMENT PREVIEW CANVAS */
-                <div className="w-full max-w-md bg-white text-slate-800 shadow-lg rounded-xl border border-slate-300 overflow-hidden flex flex-col text-[10px] min-h-[480px]">
-                  {/* Page Top Kop Banner */}
-                  <div className="p-3 text-white" style={{ background: 'linear-gradient(135deg, #0E2340, #16345E)' }}>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-[8px] tracking-wider text-amber-300 font-bold uppercase">
-                          PT AJINOMOTO INDONESIA &bull; MOJOKERTO FACTORY
-                        </p>
-                        <h4 className="text-xs font-bold text-white mt-0.5">LAPORAN MONITORING MULTI-SKILL</h4>
-                        <p className="text-[8px] text-slate-300">
-                          Periode: {blnStr} {thnStr} &bull; Dicetak: {new Date().toLocaleDateString('id-ID')}
-                        </p>
-                      </div>
-                      <div className="w-8 h-8 rounded-lg bg-white p-1 flex items-center justify-center">
-                        <img
-                          src="https://upload.wikimedia.org/wikipedia/commons/0/01/Ajinomoto_Group_Global_Brand_logo.png"
-                          alt="Logo"
-                          className="max-h-full max-w-full object-contain"
-                        />
+                /* 3-PAGE PDF VISUAL PREVIEWS */
+                <div className="w-[340px] sm:w-[420px] min-h-[580px] bg-white text-slate-800 rounded-lg shadow-xl border border-slate-300 flex flex-col justify-between overflow-hidden">
+                  {/* PDF Top Official Header Banner */}
+                  <div className="relative">
+                    <div className="p-3 text-white flex items-center justify-between" style={{ backgroundColor: '#0E2340' }}>
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded bg-white p-0.5 flex items-center justify-center shrink-0">
+                          <img
+                            src="https://upload.wikimedia.org/wikipedia/commons/0/01/Ajinomoto_Group_Global_Brand_logo.png"
+                            alt="Logo Ajinomoto"
+                            className="max-h-full max-w-full object-contain"
+                          />
+                        </div>
+                        <div>
+                          <p className="text-[7.5px] tracking-wider text-slate-300 uppercase font-semibold leading-tight">
+                            Eat Well, Live Well.
+                          </p>
+                          <p className="text-[12px] font-extrabold text-white leading-tight">AJINOMOTO MOJOKERTO FACTORY</p>
+                          <p className="text-[8px] text-slate-300 leading-tight">
+                            Laporan Monitoring Multi-Skill Karyawan &amp; Manajer
+                          </p>
+                        </div>
                       </div>
                     </div>
+                    {/* Gold stripe */}
+                    <div className="h-1 w-full" style={{ backgroundColor: '#B8874B' }}></div>
                   </div>
-                  <div className="h-1 bg-amber-500 w-full"></div>
 
-                  {/* Page Body Preview */}
+                  {/* PDF Content Area Based on Active Preview Page */}
                   <div className="p-3.5 space-y-3 flex-1 flex flex-col justify-between">
                     {activePreviewPage === 'page1' && (
                       <div className="space-y-2.5 animate-fadeIn">
@@ -951,141 +1463,124 @@ export const ExportPdfModal: React.FC<ExportPdfModalProps> = ({
 
         {/* Modal Footer Controls */}
         <div className="px-5 sm:px-6 py-3.5 border-t border-slate-200 dark:border-slate-800 shrink-0 space-y-3 bg-white dark:bg-slate-900">
-          {/* Email Quick Row Drawer */}
-          {isEmailRowOpen && (
-            <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 space-y-3 animate-fadeIn">
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="w-7 h-7 rounded-lg bg-blue-100 dark:bg-blue-950 text-blue-600 dark:text-blue-400 flex items-center justify-center text-xs font-bold">
-                    <i className="fa-solid fa-paper-plane"></i>
-                  </span>
-                  <div>
-                    <p className="text-xs font-bold text-slate-800 dark:text-slate-100">
-                      Pengiriman Laporan Resmi Multi-Skill Monitoring
-                    </p>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                      Pengirim: <strong className="text-slate-700 dark:text-slate-200">{currentUser.email || 'mahmudnurdiansyah4@gmail.com'}</strong> ({signerName})
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setActivePreviewPage('email');
-                      setEmailViewMode('edit');
-                    }}
-                    className="text-[11px] font-semibold text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 cursor-pointer"
-                  >
-                    <i className="fa-solid fa-pen-to-square text-[10px]"></i>
-                    <span>Edit Redaksional</span>
-                  </button>
-                  <span className="text-slate-300 dark:text-slate-700">&bull;</span>
-                  <button
-                    type="button"
-                    onClick={handleCopyEmailText}
-                    className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 hover:underline flex items-center gap-1 cursor-pointer"
-                  >
-                    <i className={`fa-solid ${copiedEmailText ? 'fa-check text-emerald-600' : 'fa-copy text-[10px]'}`}></i>
-                    <span>{copiedEmailText ? 'Tersalin' : 'Salin Pesan'}</span>
-                  </button>
-                  <span className="text-slate-300 dark:text-slate-700">&bull;</span>
-                  <button
-                    type="button"
-                    onClick={() => setShowWebhookConfig(!showWebhookConfig)}
-                    className="text-[11px] font-semibold text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 flex items-center gap-1 cursor-pointer"
-                  >
-                    <i className="fa-solid fa-gear text-[10px]"></i>
-                    <span>Webhook Server</span>
-                  </button>
+          {/* Quick Direct Email Sending Bar */}
+          <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-700 space-y-2.5">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <span className="w-7 h-7 rounded-lg bg-emerald-100 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400 flex items-center justify-center text-xs font-bold">
+                  <i className="fa-solid fa-paper-plane"></i>
+                </span>
+                <div>
+                  <p className="text-xs font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                    <span>Kirim Laporan Resmi Langsung dari Sistem</span>
+                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 bg-emerald-100/70 dark:bg-emerald-900/50 px-2 py-0.5 rounded-full font-bold">
+                      + Lampiran PDF Otomatis
+                    </span>
+                  </p>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Pengirim: <strong className="text-slate-700 dark:text-slate-200">{currentUser.email || 'mahmudnurdiansyah4@gmail.com'}</strong> ({signerName})
+                  </p>
                 </div>
               </div>
 
-              {/* Webhook Configuration Panel (Optional) */}
-              {showWebhookConfig && (
-                <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 space-y-2 text-xs">
-                  <label className="block font-bold text-slate-700 dark:text-slate-300">
-                    URL Webhook Email Server (Opsional untuk pengiriman direct serverless):
-                  </label>
-                  <div className="flex gap-2">
-                    <input
-                      type="url"
-                      value={emailWebhookUrl}
-                      onChange={(e) => setEmailWebhookUrlState(e.target.value)}
-                      placeholder="https://your-email-server.example.com/api/send"
-                      className="input-elegant flex-1 px-3 py-1.5 font-mono text-xs"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => {
-                        saveEmailWebhookUrl(emailWebhookUrl);
-                        setEmailAlert({ type: 'success', message: 'URL Webhook Email Server berhasil disimpan.' });
-                      }}
-                      className="btn-navy px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer"
-                    >
-                      Simpan
-                    </button>
-                  </div>
-                  <p className="text-[10.5px] text-slate-400">
-                    Jika webhook kosong, sistem akan langsung membuka client email/Gmail resmi dengan subjek dan teks redaksional yang sudah Anda sesuaikan.
-                  </p>
-                </div>
-              )}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActivePreviewPage('email');
+                    setEmailViewMode('edit');
+                  }}
+                  className="text-[11px] font-semibold text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 cursor-pointer"
+                >
+                  <i className="fa-solid fa-pen-to-square text-[10px]"></i>
+                  <span>Edit Redaksional</span>
+                </button>
+                <span className="text-slate-300 dark:text-slate-700">&bull;</span>
+                <button
+                  type="button"
+                  onClick={() => setActivePreviewPage('smtp')}
+                  className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 hover:underline flex items-center gap-1 cursor-pointer"
+                >
+                  <i className="fa-solid fa-gear text-[10px]"></i>
+                  <span>Pengaturan SMTP</span>
+                </button>
+                <span className="text-slate-300 dark:text-slate-700">&bull;</span>
+                <button
+                  type="button"
+                  onClick={() => setActivePreviewPage('history')}
+                  className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 hover:underline flex items-center gap-1 cursor-pointer"
+                >
+                  <i className="fa-solid fa-clock-rotate-left text-[10px]"></i>
+                  <span>Riwayat Pengiriman</span>
+                </button>
+              </div>
+            </div>
 
-              <div className="flex gap-2 items-center flex-wrap">
+            <div className="flex gap-2 items-center flex-wrap">
+              <div className="relative flex-1 min-w-[260px]">
+                <i className="fa-solid fa-at absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
                 <input
                   type="email"
                   value={emailContent.toEmail}
                   onChange={(e) => setEmailContent({ ...emailContent, toEmail: e.target.value })}
                   placeholder="Masukkan alamat email pimpinan/tujuan (contoh: pimpinan@ajinomoto.co.id)..."
-                  className="input-elegant flex-1 min-w-[260px] px-3 py-2 outline-none text-xs sm:text-sm text-slate-800 dark:text-slate-100"
+                  className="input-elegant w-full pl-8 pr-3 py-2 outline-none text-xs sm:text-sm text-slate-800 dark:text-slate-100 font-semibold"
                 />
-                <button
-                  type="button"
-                  onClick={handleSendEmail}
-                  disabled={isSendingEmail}
-                  className="btn-navy px-5 py-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-2 whitespace-nowrap cursor-pointer disabled:opacity-60 shadow-sm hover:opacity-95"
-                >
-                  {isSendingEmail ? (
-                    <>
-                      <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
-                      <span>Mengirim Laporan...</span>
-                    </>
-                  ) : (
-                    <>
-                      <i className="fa-solid fa-paper-plane text-xs"></i>
-                      <span>Kirim Laporan Resmi</span>
-                    </>
-                  )}
-                </button>
               </div>
+
+              {/* TOMBOL KIRIM LANGSUNG DARI SYSTEM */}
+              <button
+                type="button"
+                onClick={handleSendEmailDirect}
+                disabled={isSendingEmail}
+                className="btn-navy px-5 py-2 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 whitespace-nowrap cursor-pointer disabled:opacity-60 shadow-md hover:opacity-95 bg-gradient-to-r from-[#0E2340] to-[#1E4976] text-amber-300 border border-amber-400/30"
+              >
+                {isSendingEmail ? (
+                  <>
+                    <span className="w-3.5 h-3.5 border-2 border-amber-300/30 border-t-amber-300 rounded-full animate-spin"></span>
+                    <span>{emailSendingStep || 'Mengirim Laporan...'}</span>
+                  </>
+                ) : (
+                  <>
+                    <i className="fa-solid fa-paper-plane text-xs text-amber-400"></i>
+                    <span>Kirim Langsung dari Sistem</span>
+                  </>
+                )}
+              </button>
             </div>
-          )}
+          </div>
 
           {emailAlert && (
             <div
-              className={`rounded-xl px-3.5 py-2 text-xs font-semibold flex items-center gap-2 ${
+              className={`rounded-xl px-3.5 py-2.5 text-xs font-semibold flex items-center justify-between gap-2 animate-fadeIn ${
                 emailAlert.type === 'success'
                   ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800'
                   : 'bg-rose-50 dark:bg-rose-950/50 text-rose-800 dark:text-rose-300 border border-rose-300 dark:border-rose-800'
               }`}
             >
-              <i className={`fa-solid ${emailAlert.type === 'success' ? 'fa-check' : 'fa-circle-exclamation'}`}></i>
-              <span>{emailAlert.message}</span>
+              <div className="flex items-center gap-2">
+                <i className={`fa-solid ${emailAlert.type === 'success' ? 'fa-circle-check text-emerald-600 text-sm' : 'fa-circle-exclamation text-rose-600 text-sm'}`}></i>
+                <span>{emailAlert.message}</span>
+              </div>
+              {emailAlert.previewUrl && (
+                <a
+                  href={emailAlert.previewUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline text-blue-600 dark:text-blue-400 font-bold shrink-0 ml-2"
+                >
+                  Lihat Pratinjau Server
+                </a>
+              )}
             </div>
           )}
 
-          {/* Primary Action Buttons */}
+          {/* Bottom Controls: Download PDF or Close */}
           <div className="flex items-center justify-between flex-wrap gap-2 pt-1">
-            <button
-              type="button"
-              onClick={() => setIsEmailRowOpen(!isEmailRowOpen)}
-              className="text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-[#0E2340] dark:hover:text-white flex items-center gap-1.5 transition cursor-pointer"
-            >
-              <i className="fa-regular fa-envelope"></i>
-              <span>{isEmailRowOpen ? 'Tutup Opsi Email' : 'Kirim via Email Pimpinan'}</span>
-            </button>
+            <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+              <i className="fa-solid fa-shield-halved text-emerald-600"></i>
+              <span>Dokumen tervalidasi digital &bull; Mojokerto Factory</span>
+            </div>
 
             <div className="flex items-center gap-2.5">
               <button
@@ -1093,7 +1588,7 @@ export const ExportPdfModal: React.FC<ExportPdfModalProps> = ({
                 onClick={onClose}
                 className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
               >
-                Batal
+                Tutup
               </button>
 
               <button
