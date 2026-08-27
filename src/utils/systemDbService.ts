@@ -173,32 +173,39 @@ export async function removeServerUserPhoto(
 export async function serverLogin(
   username: string,
   password: string
-): Promise<{ success: boolean; message?: string; session?: UserSession; user?: UserAccount }> {
+): Promise<{ success: boolean; message?: string; session?: UserSession; user?: UserAccount; isNetworkError?: boolean }> {
   try {
     const res = await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password })
+      body: JSON.stringify({ username: username.trim(), password })
     });
     const { ok, data, message } = await safeParseJson<{
       success: boolean;
       message?: string;
       session?: UserSession;
       user?: UserAccount;
-    }>(res, 'Gagal memverifikasi login ke server.');
+    }>(res, 'Gagal menghubungi server otentikasi.');
 
     if (data && typeof data.success === 'boolean') {
-      return data;
+      return {
+        success: data.success,
+        message: data.message || (data.success ? 'Login berhasil.' : 'Username atau password salah. Silakan coba lagi.'),
+        session: data.session,
+        user: data.user
+      };
     }
 
     return {
-      success: ok,
+      success: false,
+      isNetworkError: true,
       message: message || 'Gagal menghubungi server otentikasi.'
     };
   } catch (err: any) {
-    console.error('Server login error:', err);
+    console.warn('Server login network error:', err);
     return {
       success: false,
+      isNetworkError: true,
       message: 'Gagal menghubungi server otentikasi.'
     };
   }

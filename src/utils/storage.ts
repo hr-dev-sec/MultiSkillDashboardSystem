@@ -203,14 +203,16 @@ export function clearSession(): void {
 }
 
 /**
- * Check Login with Server Authentication first, fallback to local cache
+ * Check Login with Server Authentication first, seamless fallback to local cache
  */
 export async function checkLoginAsync(
   username: string,
   password: string
 ): Promise<{ success: boolean; message?: string; session?: UserSession }> {
+  const cleanUsername = username.trim();
+  
   try {
-    const serverRes = await serverLogin(username.trim(), password);
+    const serverRes = await serverLogin(cleanUsername, password);
     if (serverRes.success && serverRes.session) {
       saveStoredSession(serverRes.session);
       // Refresh local users list
@@ -227,13 +229,21 @@ export async function checkLoginAsync(
         saveStoredUsers(users);
       }
       return { success: true, session: serverRes.session };
-    } else if (serverRes.message && !serverRes.message.includes('Gagal menghubungi')) {
-      return { success: false, message: serverRes.message };
     }
-  } catch (_) {}
+  } catch (err) {
+    console.warn('Backend login attempt encountered an exception, proceeding with local fallback:', err);
+  }
 
-  // Fallback to local check
-  return checkLogin(username, password);
+  // Fallback to local authentication
+  const localRes = checkLogin(cleanUsername, password);
+  if (localRes.success) {
+    return localRes;
+  }
+
+  return {
+    success: false,
+    message: 'Username atau kata sandi tidak sesuai. Mohon periksa kembali kredensial Anda.'
+  };
 }
 
 export function checkLogin(username: string, password: string): { success: boolean; message?: string; session?: UserSession } {
