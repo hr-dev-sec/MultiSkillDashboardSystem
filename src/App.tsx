@@ -13,7 +13,7 @@ import {
 } from './utils/storage';
 import { INITIAL_SKILL_META } from './data/initialData';
 import { Employee, UserSession, AppFiltersState } from './types';
-import { getSupabaseConfig, fetchSupabaseEmployees } from './utils/syncService';
+import { getSupabaseConfig, fetchSupabaseEmployees, fetchGoogleSheetData, getSavedGoogleSheetUrl } from './utils/syncService';
 
 // Components
 import { LandingPage } from './components/LandingPage';
@@ -151,9 +151,11 @@ export default function App() {
       setCurrentUser(session);
     }
 
-    // Auto-fetch data from Supabase Cloud if configured
+    // Auto-fetch data from Supabase Cloud on boot (with automatic fallback to Google Sheets Live Master)
     const autoSyncFromCloud = async () => {
       const config = getSupabaseConfig();
+      let hasLoadedFromCloud = false;
+
       if (config.url && config.anonKey) {
         try {
           const res = await fetchSupabaseEmployees(config);
@@ -169,10 +171,35 @@ export default function App() {
               bulan: defaultPeriod.bulan
             }));
             
-            console.log(`[Cloud Sync] Otomatis memuat ${res.data.length} karyawan dari Supabase Cloud.`);
+            hasLoadedFromCloud = true;
+            console.log(`[Cloud Sync] Otomatis memuat ${res.data.length} karyawan dari Supabase Cloud (Semua Halaman).`);
           }
         } catch (err) {
-          console.warn('[Cloud Sync] Gagal sinkronisasi otomatis latar belakang:', err);
+          console.warn('[Cloud Sync] Gagal sinkronisasi Supabase:', err);
+        }
+      }
+
+      // Fallback: Jika Supabase belum dikonfigurasi / kosong di Incognito, tarik otomatis dari Google Sheet Master
+      if (!hasLoadedFromCloud) {
+        const defaultSheet = getSavedGoogleSheetUrl();
+        if (defaultSheet) {
+          try {
+            const sheetRes = await fetchGoogleSheetData(defaultSheet);
+            if (sheetRes.success && sheetRes.data && sheetRes.data.length > 0) {
+              setEmployees(sheetRes.data);
+              saveStoredEmployees(sheetRes.data);
+              
+              const defaultPeriod = getDefaultFilterPeriod(sheetRes.data);
+              setFilters((prev) => ({
+                ...prev,
+                tahun: defaultPeriod.tahun,
+                bulan: defaultPeriod.bulan
+              }));
+              console.log(`[Live Sync] Otomatis memuat ${sheetRes.data.length} karyawan dari Google Sheets Master.`);
+            }
+          } catch (sheetErr) {
+            console.warn('[Live Sync] Gagal sinkronisasi Google Sheets:', sheetErr);
+          }
         }
       }
     };

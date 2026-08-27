@@ -603,7 +603,7 @@ export function mergeEmployeesData(
 // -------------------------------------------------------------
 export async function fetchGoogleSheetData(
   sheetUrl: string,
-  currentEmployees: Employee[]
+  currentEmployees: Employee[] = []
 ): Promise<SyncResponse<Employee[]>> {
   try {
     if (!sheetUrl || !sheetUrl.trim()) {
@@ -813,32 +813,68 @@ export async function fetchSupabaseEmployees(
     let rows: any[] = [];
     const client = getSupabaseClient(config);
 
-    if (client) {
-      const { data, error } = await client
-        .from(tableName)
-        .select('*')
-        .order('id', { ascending: true });
+    // Supabase PostgREST default query limit is 1000 rows.
+    // We implement chunked pagination to fetch ALL records without truncation.
+    const CHUNK_SIZE = 1000;
+    let page = 0;
+    let keepFetching = true;
 
-      if (error) {
-        return { success: false, message: `Gagal mengambil data dari Supabase: ${error.message}` };
-      }
-      rows = data || [];
-    } else {
-      const res = await fetch(`${cleanUrl}/rest/v1/${tableName}?select=*&order=id.asc`, {
-        method: 'GET',
-        headers: {
-          'apikey': config.anonKey,
-          'Authorization': `Bearer ${config.anonKey}`
+    while (keepFetching) {
+      const from = page * CHUNK_SIZE;
+      const to = from + CHUNK_SIZE - 1;
+      let chunkData: any[] = [];
+
+      if (client) {
+        const { data, error } = await client
+          .from(tableName)
+          .select('*')
+          .range(from, to);
+
+        if (error) {
+          if (page === 0) {
+            // Fallback to basic select if range is not supported
+            const fallback = await client.from(tableName).select('*');
+            if (fallback.error) {
+              return { success: false, message: `Gagal mengambil data dari Supabase: ${fallback.error.message}` };
+            }
+            rows = fallback.data || [];
+          }
+          break;
         }
-      });
+        chunkData = data || [];
+      } else {
+        const res = await fetch(`${cleanUrl}/rest/v1/${tableName}?select=*`, {
+          method: 'GET',
+          headers: {
+            'apikey': config.anonKey,
+            'Authorization': `Bearer ${config.anonKey}`,
+            'Range-Unit': 'items',
+            'Range': `${from}-${to}`
+          }
+        });
 
-      if (!res.ok) {
-        return {
-          success: false,
-          message: `Gagal mengambil data dari Supabase (HTTP ${res.status}).`
-        };
+        if (!res.ok) {
+          if (page === 0) {
+            return {
+              success: false,
+              message: `Gagal mengambil data dari Supabase (HTTP ${res.status}: ${res.statusText}).`
+            };
+          }
+          break;
+        }
+        chunkData = await res.json();
       }
-      rows = await res.json();
+
+      if (Array.isArray(chunkData) && chunkData.length > 0) {
+        rows.push(...chunkData);
+        if (chunkData.length < CHUNK_SIZE) {
+          keepFetching = false;
+        } else {
+          page++;
+        }
+      } else {
+        keepFetching = false;
+      }
     }
 
     if (!Array.isArray(rows) || rows.length === 0) {
@@ -857,28 +893,30 @@ export async function fetchSupabaseEmployees(
     const periodsSet = new Set<string>();
 
     rows.forEach((r: any, idx: number) => {
-      const empId = r.emp_id || r.empId || r.nip || `EMP-${idx + 1}`;
-      const empName = r.emp_name || r.empName || r.nama || `Karyawan ${idx + 1}`;
-      const divisi = r.divisi || r.division || '';
-      const department = r.department || r.dept || '';
-      const section = r.section || r.seksi || '';
-      const grade = r.grade || '';
-      const jobGrade = r.job_grade || r.jobGrade || '';
-      const jabatan = r.jabatan || r.position || '';
-      const gender = (r.gender || 'L').toString().toUpperCase().startsWith('P') ? 'P' : 'L';
-      const tanggalPensiun = r.tanggal_pensiun || r.tanggalPensiun || '';
-      const pic = r.pic || '';
+      const empId = (r.emp_id || r.empId || r.nip || r.nik || r.id_karyawan || `EMP-${idx + 1}`).toString().trim();
+      const empName = (r.emp_name || r.empName || r.nama || r.nama_karyawan || `Karyawan ${idx + 1}`).toString().trim();
+      const divisi = (r.divisi || r.division || '').toString().trim();
+      const department = (r.department || r.dept || r.departemen || '').toString().trim();
+      const section = (r.section || r.seksi || '').toString().trim();
+      const grade = (r.grade || '').toString().trim();
+      const jobGrade = (r.job_grade || r.jobGrade || r.jg || '').toString().trim();
+      const jabatan = (r.jabatan || r.position || r.posisi || '').toString().trim();
+      const rawGender = (r.gender || r.jenis_kelamin || r.jk || 'L').toString().toUpperCase().trim();
+      const gender = rawGender.startsWith('P') || rawGender.startsWith('F') || rawGender.startsWith('W') ? 'P' : 'L';
+      const tanggalPensiun = (r.tanggal_pensiun || r.tanggalPensiun || r.pensiun || '').toString().trim();
+      const pic = (r.pic || '').toString().trim();
       const tahun = parseInt(r.tahun || r.year || currentYear, 10);
       const bulan = parseInt(r.bulan || r.month || currentMonth, 10);
 
       periodsSet.add(`${BULAN_LABELS[bulan - 1] || bulan} ${tahun}`);
 
-      // Parse skills: handle JSONB object or stringified JSON
+      // Parse skills: handle JSONB object, stringified JSON, or individual skill columns
       let skills: Record<string, boolean> = {};
       INITIAL_SKILL_META.forEach((sm) => {
         skills[sm.code] = false;
       });
 
+      let hasParsedSkills = false;
       if (r.skills) {
         let rawSkills = r.skills;
         if (typeof rawSkills === 'string') {
@@ -888,14 +926,25 @@ export async function fetchSupabaseEmployees(
         }
         if (typeof rawSkills === 'object' && rawSkills !== null) {
           Object.keys(rawSkills).forEach((k) => {
-            if (rawSkills[k] === true || rawSkills[k] === 1 || rawSkills[k] === '1') {
+            if (rawSkills[k] === true || rawSkills[k] === 1 || rawSkills[k] === '1' || rawSkills[k] === 'true' || rawSkills[k] === 'TRUE') {
               skills[k] = true;
+              hasParsedSkills = true;
             }
           });
         }
       }
 
-      const customStandard = r.standard !== undefined && r.standard !== null ? Number(r.standard) : null;
+      // Fallback: Check if skills are stored as individual columns on the record (e.g. from direct CSV import to Supabase)
+      if (!hasParsedSkills) {
+        INITIAL_SKILL_META.forEach((sm) => {
+          const val = r[sm.code] ?? r[sm.code.replace('.', '_')] ?? r[`skill_${sm.code}`] ?? r[`skill_${sm.code.replace('.', '_')}`];
+          if (val === true || val === 1 || val === '1' || val === 'TRUE' || val === 'true' || val === 'ok' || val === 'OK') {
+            skills[sm.code] = true;
+          }
+        });
+      }
+
+      const customStandard = r.standard !== undefined && r.standard !== null && !isNaN(Number(r.standard)) ? Number(r.standard) : null;
       const calc = calculateEmployeeScore(skills, jabatan, customStandard);
 
       parsed.push({
