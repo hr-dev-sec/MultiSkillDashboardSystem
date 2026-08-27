@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { AJINOMOTO_LOGO_URL, checkLogin } from '../utils/storage';
+import { AJINOMOTO_LOGO_URL, checkLoginAsync } from '../utils/storage';
 import { UserSession } from '../types';
 
 interface LoginPageProps {
@@ -30,13 +30,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({
     desc: 'Pengelolaan terpusat pemantauan kompetensi Multi-Skill: Konfigurasi matriks 92 standar keahlian, pengelolaan data karyawan, sinkronisasi data cloud, dan pengesahan laporan resmi.'
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
     setLoading(true);
 
-    setTimeout(() => {
-      const res = checkLogin(username.trim(), password);
+    try {
+      const res = await checkLoginAsync(username.trim(), password);
       setLoading(false);
 
       if (res.success && res.session) {
@@ -46,7 +46,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({
         setShake(true);
         setTimeout(() => setShake(false), 500);
       }
-    }, 400);
+    } catch (err: any) {
+      setLoading(false);
+      setErrorMsg('Terjadi gangguan saat memverifikasi akun.');
+      setShake(true);
+      setTimeout(() => setShake(false), 500);
+    }
   };
 
   return (

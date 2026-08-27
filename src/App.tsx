@@ -9,7 +9,8 @@ import {
   extractPeriods,
   filterEmployees,
   calculateEmployeeScore,
-  getDefaultFilterPeriod
+  getDefaultFilterPeriod,
+  syncSystemFromBackend
 } from './utils/storage';
 import { INITIAL_SKILL_META } from './data/initialData';
 import { Employee, UserSession, AppFiltersState } from './types';
@@ -144,12 +145,22 @@ export default function App() {
     }
   }, [isDarkMode]);
 
-  // Check initial session & auto-sync from Supabase Cloud on boot
+  // Check initial session & auto-sync system DB & employee data on boot
   useEffect(() => {
     const session = getSession();
     if (session) {
       setCurrentUser(session);
     }
+
+    // Always fetch latest persistent user accounts, profiles, photos, and system configuration from Server DB
+    syncSystemFromBackend().then((res) => {
+      if (res) {
+        const refreshedSession = getSession();
+        if (refreshedSession && refreshedSession.username) {
+          setCurrentUser(refreshedSession);
+        }
+      }
+    });
 
     // Auto-fetch data from Supabase Cloud on boot (with automatic fallback to Google Sheets Live Master)
     const autoSyncFromCloud = async () => {

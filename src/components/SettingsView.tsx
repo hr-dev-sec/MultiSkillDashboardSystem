@@ -1,7 +1,21 @@
 import React, { useState, useEffect } from 'react';
-import { Employee, PeriodsData, UserSession, AppFiltersState } from '../types';
+import { Employee, PeriodsData, UserSession, AppFiltersState, UserAccount, ActivityLog } from '../types';
 import { BULAN_LABELS } from '../data/initialData';
-import { changePassword, updateUserProfile, duplicatePeriod, exportDatabaseCsv, buildReportPdfDoc, AJINOMOTO_LOGO_URL } from '../utils/storage';
+import {
+  changePasswordAsync,
+  updateUserProfileAsync,
+  duplicatePeriod,
+  exportDatabaseCsv,
+  buildReportPdfDoc,
+  AJINOMOTO_LOGO_URL,
+  getStoredUsers
+} from '../utils/storage';
+import {
+  fetchSystemInit,
+  fetchServerActivityLogs,
+  createServerUser,
+  deleteServerUser
+} from '../utils/systemDbService';
 import { DEFAULT_GOOGLE_SHEET_URL, getSavedGoogleSheetUrl } from '../utils/syncService';
 import { SmtpConfig, getSavedSmtpConfig, saveSmtpConfig, testSmtpConnection } from '../utils/emailReportService';
 import { ExportExcelConfirmModal } from './ExportExcelConfirmModal';
@@ -66,6 +80,44 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordAlert, setPasswordAlert] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [isSubmittingPassword, setIsSubmittingPassword] = useState(false);
+
+  // System Database Users & Audit Logs State
+  const [systemUsers, setSystemUsers] = useState<UserAccount[]>(() => getStoredUsers());
+  const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
+  const [isLoadingSystemDb, setIsLoadingSystemDb] = useState(false);
+  const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
+  const [newUserForm, setNewUserForm] = useState({
+    username: '',
+    password: '',
+    name: '',
+    role: 'HR Competency Analyst',
+    department: 'Human Resources Development',
+    nik: '',
+    email: '',
+    phone: ''
+  });
+  const [newUserAlert, setNewUserAlert] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [isCreatingUser, setIsCreatingUser] = useState(false);
+
+  // Load system DB data on mount
+  useEffect(() => {
+    setIsLoadingSystemDb(true);
+    fetchSystemInit().then((res) => {
+      setIsLoadingSystemDb(false);
+      if (res) {
+        if (res.users && res.users.length > 0) setSystemUsers(res.users);
+        if (res.recentLogs) setActivityLogs(res.recentLogs);
+      }
+    });
+  }, []);
+
+  const refreshSystemData = async () => {
+    const res = await fetchSystemInit();
+    if (res) {
+      if (res.users) setSystemUsers(res.users);
+      if (res.recentLogs) setActivityLogs(res.recentLogs);
+    }
+  };
 
   // 2. Duplikasi Periode State
   const latestPeriod = periods.tahunList.length
@@ -136,7 +188,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   };
 
   // Handle Change Password
-  const handlePasswordSubmit = (e: React.FormEvent) => {
+  const handlePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setPasswordAlert(null);
 
@@ -146,16 +198,96 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
 
     setIsSubmittingPassword(true);
-    setTimeout(() => {
-      const res = changePassword(currentUser.username, oldPassword, newPassword);
+    try {
+      const res = await changePasswordAsync(currentUser.username, oldPassword, newPassword);
       setIsSubmittingPassword(false);
       setPasswordAlert({ type: res.success ? 'success' : 'error', message: res.message });
       if (res.success) {
         setOldPassword('');
         setNewPassword('');
         setConfirmPassword('');
+        refreshSystemData();
       }
-    }, 350);
+    } catch (err: any) {
+      setIsSubmittingPassword(false);
+      setPasswordAlert({ type: 'error', message: err?.message || 'Gagal mengubah password.' });
+    }
+  };
+
+  // Handle Create New User
+  const handleCreateNewUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setNewUserAlert(null);
+
+    if (!newUserForm.username.trim() || !newUserForm.password.trim() || !newUserForm.name.trim()) {
+      setNewUserAlert({ type: 'error', message: 'Nama, username, dan password wajib diisi.' });
+      return;
+    }
+
+    setIsCreatingUser(true);
+    try {
+      const res = await createServerUser({
+        username: newUserForm.username.trim(),
+        password: newUserForm.password.trim(),
+        name: newUserForm.name.trim(),
+        role: newUserForm.role.trim(),
+        department: newUserForm.department.trim(),
+        nik: newUserForm.nik.trim(),
+        email: newUserForm.email.trim(),
+        phone: newUserForm.phone.trim()
+      });
+      setIsCreatingUser(false);
+
+      if (res.success) {
+        setNewUserAlert({ type: 'success', message: res.message });
+        setNewUserForm({
+          username: '',
+          password: '',
+          name: '',
+          role: 'HR Competency Analyst',
+          department: 'Human Resources Development',
+          nik: '',
+          email: '',
+          phone: ''
+        });
+        await refreshSystemData();
+        setTimeout(() => {
+          setIsAddUserModalOpen(false);
+          setNewUserAlert(null);
+        }, 1200);
+      } else {
+        setNewUserAlert({ type: 'error', message: res.message });
+      }
+    } catch (err: any) {
+      setIsCreatingUser(false);
+      setNewUserAlert({ type: 'error', message: err?.message || 'Gagal membuat user baru.' });
+    }
+  };
+
+  // Handle Delete User
+  const handleDeleteUser = async (targetUsername: string) => {
+    if (targetUsername === currentUser.username) {
+      alert('Anda tidak dapat menghapus akun yang sedang Anda gunakan saat ini.');
+      return;
+    }
+
+    setConfirmModal({
+      isOpen: true,
+      title: `Hapus Akun Pengguna: ${targetUsername}`,
+      variant: 'danger',
+      icon: 'fa-solid fa-trash-can',
+      confirmLabel: 'Ya, Hapus Akun',
+      description: `Apakah Anda yakin ingin menghapus akun pengguna "${targetUsername}" dari database sistem? Akun ini tidak akan dapat login kembali.`,
+      onConfirm: async () => {
+        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+        const res = await deleteServerUser(targetUsername);
+        if (res.success) {
+          await refreshSystemData();
+        } else {
+          alert(res.message);
+        }
+      }
+    });
   };
 
   const executeDuplicate = () => {
@@ -250,7 +382,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   };
 
   // Handle Profile Submit
-  const handleProfileSubmit = (e: React.FormEvent) => {
+  const handleProfileSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setProfileAlert(null);
 
@@ -264,8 +396,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
 
     setIsSubmittingProfile(true);
-    setTimeout(() => {
-      const res = updateUserProfile(currentUser.username, {
+    try {
+      const res = await updateUserProfileAsync(currentUser.username, {
         name: adminName.trim(),
         username: adminUsername.trim(),
         nik: adminNik.trim(),
@@ -283,13 +415,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         if (onUpdateCurrentUser) {
           onUpdateCurrentUser(res.session);
         }
+        await refreshSystemData();
         try {
           confetti({ particleCount: 50, spread: 60, origin: { y: 0.4 } });
         } catch (_) {}
       } else {
         setProfileAlert({ type: 'error', message: res.message });
       }
-    }, 350);
+    } catch (err: any) {
+      setIsSubmittingProfile(false);
+      setProfileAlert({ type: 'error', message: err?.message || 'Gagal menyimpan profil ke database.' });
+    }
   };
 
   // Handle PDF Generation & Download
@@ -700,6 +836,193 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </ul>
           </div>
         </div>
+      </div>
+
+      {/* ROW 1.5: DATABASE SISTEM & MANAJEMEN AKUN PENGGUNA TERPUSAT */}
+      <div className="card-elegant p-6 border border-indigo-500/30 bg-gradient-to-br from-white via-white to-indigo-50/20 dark:from-slate-900 dark:via-slate-900 dark:to-indigo-950/20 space-y-5">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div>
+            <p className="eyebrow !text-indigo-600 dark:text-indigo-400 text-[10px] uppercase font-bold tracking-wider mb-1 flex items-center gap-1.5">
+              <i className="fa-solid fa-database text-indigo-600 dark:text-indigo-400"></i> Persistent System Database
+            </p>
+            <h3 className="section-title text-base sm:text-lg mb-1 flex items-center gap-2 text-slate-900 dark:text-white">
+              Database Sistem &amp; Manajemen Pengguna
+            </h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400 max-w-3xl leading-relaxed">
+              Struktur database terpusat menyimpan seluruh data akun administrator, foto profil, pengaturan pengesahan elektronik, dan catatan aktivitas secara permanen lintas sesi browser dan mode Incognito.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-3 shrink-0 flex-wrap">
+            <div className="px-3 py-1.5 rounded-xl bg-emerald-100 dark:bg-emerald-950/80 border border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 text-xs font-bold flex items-center gap-2 shadow-xs">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span>Server Database JSON Aktif</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsAddUserModalOpen(true)}
+              className="btn-navy px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 shadow-sm cursor-pointer hover:opacity-95 transition"
+            >
+              <i className="fa-solid fa-user-plus text-amber-400 text-xs"></i>
+              <span>Tambah Akun Pengguna</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Tabel Pengguna Terdaftar di Database Sistem */}
+        <div className="space-y-2.5">
+          <div className="flex items-center justify-between">
+            <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-2">
+              <i className="fa-solid fa-users text-indigo-500"></i>
+              <span>Daftar Akun Otoritas Terdaftar ({systemUsers.length})</span>
+            </h4>
+            <button
+              type="button"
+              onClick={refreshSystemData}
+              className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer"
+            >
+              <i className={`fa-solid fa-rotate text-[10px] ${isLoadingSystemDb ? 'animate-spin' : ''}`}></i>
+              <span>Muat Ulang Database</span>
+            </button>
+          </div>
+
+          <div className="overflow-x-auto rounded-2xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900/90 shadow-xs">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                <tr>
+                  <th className="py-3 px-4">Pengguna</th>
+                  <th className="py-3 px-4">Username &amp; NIK</th>
+                  <th className="py-3 px-4">Role &amp; Departemen</th>
+                  <th className="py-3 px-4">Kontak &amp; Email</th>
+                  <th className="py-3 px-4 text-center">Status</th>
+                  <th className="py-3 px-4 text-right">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                {systemUsers.map((user) => {
+                  const isCurrent = user.username.trim().toLowerCase() === currentUser.username.trim().toLowerCase();
+                  const initials = user.name
+                    ? user.name.split(' ').map((n) => n[0]).slice(0, 2).join('').toUpperCase()
+                    : 'U';
+
+                  return (
+                    <tr key={user.username} className={`hover:bg-slate-50/70 dark:hover:bg-slate-800/50 transition ${isCurrent ? 'bg-indigo-50/30 dark:bg-indigo-950/20' : ''}`}>
+                      <td className="py-3 px-4">
+                        <div className="flex items-center gap-3">
+                          {user.avatarUrl ? (
+                            <img
+                              src={user.avatarUrl}
+                              alt={user.name}
+                              className="w-9 h-9 rounded-xl object-cover ring-2 ring-indigo-500/20 shrink-0"
+                            />
+                          ) : (
+                            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-700 text-white font-bold flex items-center justify-center text-xs shrink-0 shadow-xs">
+                              {initials}
+                            </div>
+                          )}
+                          <div className="min-w-0">
+                            <p className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5 truncate">
+                              <span>{user.name}</span>
+                              {isCurrent && (
+                                <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-indigo-100 dark:bg-indigo-900/80 text-indigo-700 dark:text-indigo-300 font-bold">
+                                  Anda
+                                </span>
+                              )}
+                            </p>
+                            <p className="text-[11px] text-slate-400 truncate">
+                              {user.bio ? (user.bio.length > 40 ? user.bio.substring(0, 40) + '...' : user.bio) : 'Pengguna Sistem'}
+                            </p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="py-3 px-4">
+                        <p className="font-mono font-bold text-slate-800 dark:text-slate-200">{user.username}</p>
+                        <p className="font-mono text-[11px] text-indigo-600 dark:text-indigo-400">NIK: {user.nik || '-'}</p>
+                      </td>
+                      <td className="py-3 px-4">
+                        <p className="font-semibold text-slate-800 dark:text-slate-200">{user.role}</p>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">{user.department}</p>
+                      </td>
+                      <td className="py-3 px-4">
+                        <p className="text-slate-700 dark:text-slate-300 font-mono text-[11.5px] truncate max-w-[180px]">{user.email || '-'}</p>
+                        <p className="text-slate-500 dark:text-slate-400 text-[11px]">{user.phone || '-'}</p>
+                      </td>
+                      <td className="py-3 px-4 text-center">
+                        <span className="badge-pill bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 text-[10.5px] px-2 py-0.5 font-bold">
+                          Aktif
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-right">
+                        {isCurrent ? (
+                          <span className="text-[11px] text-slate-400 italic">Akun Aktif</span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteUser(user.username)}
+                            className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg transition cursor-pointer"
+                            title={`Hapus akun ${user.username}`}
+                          >
+                            <i className="fa-solid fa-trash-can text-xs"></i>
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Audit Trail Log Aktivitas Sistem Terpusat */}
+        {activityLogs.length > 0 && (
+          <div className="space-y-2.5 pt-2 border-t border-slate-200 dark:border-slate-800">
+            <div className="flex items-center justify-between">
+              <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                <i className="fa-solid fa-clock-rotate-left text-indigo-500"></i>
+                <span>Audit Trail &amp; Log Aktivitas Sistem Terkini ({activityLogs.length})</span>
+              </h4>
+              <span className="text-[10.5px] text-slate-400">Tercatat di Server Database</span>
+            </div>
+
+            <div className="max-h-48 overflow-y-auto rounded-2xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900/90 shadow-xs">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 text-[10.5px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider sticky top-0">
+                  <tr>
+                    <th className="py-2 px-3">Waktu</th>
+                    <th className="py-2 px-3">Pengguna</th>
+                    <th className="py-2 px-3">Aksi</th>
+                    <th className="py-2 px-3">Keterangan</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-[11.5px]">
+                  {activityLogs.slice(0, 15).map((log) => {
+                    const timeStr = new Date(log.timestamp).toLocaleString('id-ID', {
+                      day: '2-digit',
+                      month: 'short',
+                      year: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    });
+
+                    return (
+                      <tr key={log.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40">
+                        <td className="py-2 px-3 text-slate-400 font-mono text-[10.5px] whitespace-nowrap">{timeStr}</td>
+                        <td className="py-2 px-3 font-semibold text-slate-800 dark:text-slate-200 whitespace-nowrap">{log.username}</td>
+                        <td className="py-2 px-3 whitespace-nowrap">
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-50 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                            {log.action}
+                          </span>
+                        </td>
+                        <td className="py-2 px-3 text-slate-600 dark:text-slate-300">{log.details}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ROW 2: DUPLIKASI DATA & DOWNLOAD DATA */}
@@ -1197,6 +1520,177 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         onConfirm={confirmModal.onConfirm}
         onCancel={() => setConfirmModal((prev) => ({ ...prev, isOpen: false }))}
       />
+
+      {/* ================= MODAL: TAMBAH AKUN PENGGUNA BARU ================= */}
+      {isAddUserModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs animate-fadeIn">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 w-full max-w-lg shadow-2xl overflow-hidden animate-scaleUp">
+            <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/50 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <span className="w-8 h-8 rounded-xl bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 flex items-center justify-center text-sm font-bold shadow-xs">
+                  <i className="fa-solid fa-user-plus"></i>
+                </span>
+                <div>
+                  <h3 className="font-bold text-sm text-slate-900 dark:text-white">Tambah Pengguna Baru</h3>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">Database Sistem &amp; Akses Otoritas</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsAddUserModalOpen(false);
+                  setNewUserAlert(null);
+                }}
+                className="w-7 h-7 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center transition cursor-pointer"
+              >
+                <i className="fa-solid fa-xmark"></i>
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateNewUser} className="p-6 space-y-4">
+              {newUserAlert && (
+                <div
+                  className={`rounded-xl px-3.5 py-2.5 text-xs font-semibold flex items-center gap-2 ${
+                    newUserAlert.type === 'success'
+                      ? 'bg-emerald-50 text-emerald-800 border border-emerald-300 dark:bg-emerald-950/50 dark:text-emerald-300'
+                      : 'bg-rose-50 text-rose-800 border border-rose-300 dark:bg-rose-950/50 dark:text-rose-300'
+                  }`}
+                >
+                  <i className={`fa-solid ${newUserAlert.type === 'success' ? 'fa-check' : 'fa-circle-exclamation'}`}></i>
+                  <span>{newUserAlert.message}</span>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                    Nama Lengkap <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={newUserForm.name}
+                    onChange={(e) => setNewUserForm({ ...newUserForm, name: e.target.value })}
+                    placeholder="Contoh: Budi Santoso"
+                    className="input-elegant w-full px-3 py-2 text-xs"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                    Username Login <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={newUserForm.username}
+                    onChange={(e) => setNewUserForm({ ...newUserForm, username: e.target.value.toLowerCase().replace(/\s+/g, '') })}
+                    placeholder="budi_hr"
+                    className="input-elegant w-full px-3 py-2 text-xs font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                    Password Awal <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="password"
+                    required
+                    minLength={6}
+                    value={newUserForm.password}
+                    onChange={(e) => setNewUserForm({ ...newUserForm, password: e.target.value })}
+                    placeholder="••••••••"
+                    className="input-elegant w-full px-3 py-2 text-xs"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                    Jabatan / Role
+                  </label>
+                  <input
+                    type="text"
+                    value={newUserForm.role}
+                    onChange={(e) => setNewUserForm({ ...newUserForm, role: e.target.value })}
+                    placeholder="HR Competency Analyst"
+                    className="input-elegant w-full px-3 py-2 text-xs"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                    Departemen
+                  </label>
+                  <input
+                    type="text"
+                    value={newUserForm.department}
+                    onChange={(e) => setNewUserForm({ ...newUserForm, department: e.target.value })}
+                    placeholder="Human Resources Development"
+                    className="input-elegant w-full px-3 py-2 text-xs"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                    NIK Karyawan
+                  </label>
+                  <input
+                    type="text"
+                    value={newUserForm.nik}
+                    onChange={(e) => setNewUserForm({ ...newUserForm, nik: e.target.value })}
+                    placeholder="AJI-HRD-0205"
+                    className="input-elegant w-full px-3 py-2 text-xs font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                    Email Resmi
+                  </label>
+                  <input
+                    type="email"
+                    value={newUserForm.email}
+                    onChange={(e) => setNewUserForm({ ...newUserForm, email: e.target.value })}
+                    placeholder="budi.santoso@ajinomoto.co.id"
+                    className="input-elegant w-full px-3 py-2 text-xs"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsAddUserModalOpen(false);
+                    setNewUserAlert(null);
+                  }}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={isCreatingUser}
+                  className="btn-navy px-5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 shadow-xs cursor-pointer disabled:opacity-60"
+                >
+                  {isCreatingUser ? (
+                    <>
+                      <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                      <span>Menyimpan...</span>
+                    </>
+                  ) : (
+                    <>
+                      <i className="fa-solid fa-user-plus text-xs text-amber-400"></i>
+                      <span>Simpan Pengguna</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

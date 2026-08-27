@@ -4,17 +4,39 @@ import { fileURLToPath } from 'url';
 import nodemailer from 'nodemailer';
 import dotenv from 'dotenv';
 import { createServer as createViteServer } from 'vite';
+import {
+  initSystemDatabase,
+  getSystemDatabase,
+  getAllUsers,
+  getUserByUsername,
+  authenticateUser,
+  updateUserProfile,
+  updateUserPhoto,
+  removeUserPhoto,
+  changeUserPassword,
+  createNewUser,
+  deleteUser,
+  getSystemConfig,
+  updateSystemConfig,
+  getActivityLogs,
+  addActivityLog,
+  getEmailLogs,
+  addEmailLog
+} from './server/systemDb.js';
 
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Initialize System Database on startup
+initSystemDatabase();
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  // Middleware for parsing JSON with generous payload limits for base64 PDF attachments (up to 50MB)
+  // Middleware for parsing JSON with generous payload limits for base64 PDF attachments and custom avatar photos (up to 50MB)
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
@@ -26,8 +48,275 @@ async function startServer() {
       status: 'ok',
       service: 'Multi-Skill Monitoring System API',
       timestamp: new Date().toISOString(),
-      emailService: 'ready'
+      emailService: 'ready',
+      database: 'connected'
     });
+  });
+
+  // =========================================================================
+  // API ROUTE: SYSTEM DATABASE INITIALIZATION & SYNC
+  // =========================================================================
+  app.get('/api/system/init', (req, res) => {
+    try {
+      const db = getSystemDatabase();
+      // Remove passwords from public user lists
+      const sanitizedUsers = db.users.map(({ password, ...rest }) => rest);
+      res.json({
+        success: true,
+        users: sanitizedUsers,
+        config: db.config,
+        recentLogs: db.activityLogs.slice(0, 20),
+        emailLogs: db.emailLogs.slice(0, 20)
+      });
+    } catch (err: any) {
+      console.error('Error fetching system init data:', err);
+      res.status(500).json({ success: false, message: 'Gagal memuat data database sistem.' });
+    }
+  });
+
+  // =========================================================================
+  // API ROUTE: AUTHENTICATION & LOGIN
+  // =========================================================================
+  app.post('/api/auth/login', (req, res) => {
+    try {
+      const { username, password } = req.body || {};
+      if (!username || !password) {
+        return res.status(400).json({ success: false, message: 'Username dan kata sandi wajib diisi.' });
+      }
+
+      const result = authenticateUser(username, password);
+      if (!result.success || !result.user) {
+        return res.status(401).json({ success: false, message: result.message || 'Kredensial tidak valid.' });
+      }
+
+      const { password: _, ...safeUser } = result.user;
+      const session = {
+        username: safeUser.username,
+        name: safeUser.name,
+        role: safeUser.role,
+        department: safeUser.department,
+        email: safeUser.email || 'mahmud.nurdiansyah@ajinomoto.co.id',
+        phone: safeUser.phone || '0812-3456-7890',
+        nik: safeUser.nik || 'AJI-HRD-0104',
+        avatarUrl: safeUser.avatarUrl || '',
+        bio: safeUser.bio || 'Administrator Multi-Skill Monitoring & Pengembangan Kompetensi Karyawan PT Ajinomoto Indonesia Mojokerto Factory.',
+        token: 'tok_' + Math.random().toString(36).substring(2) + Date.now().toString(36)
+      };
+
+      return res.json({ success: true, session, user: safeUser });
+    } catch (err: any) {
+      console.error('Login error:', err);
+      return res.status(500).json({ success: false, message: 'Terjadi kesalahan sistem saat login.' });
+    }
+  });
+
+  // =========================================================================
+  // API ROUTE: CHANGE PASSWORD
+  // =========================================================================
+  app.post('/api/auth/change-password', (req, res) => {
+    try {
+      const { username, oldPassword, newPassword } = req.body || {};
+      if (!username || !oldPassword || !newPassword) {
+        return res.status(400).json({ success: false, message: 'Data penggantian kata sandi tidak lengkap.' });
+      }
+
+      const clientIp = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress;
+      const result = changeUserPassword(username, oldPassword, newPassword, clientIp);
+      if (!result.success) {
+        return res.status(400).json(result);
+      }
+      return res.json(result);
+    } catch (err: any) {
+      console.error('Password change error:', err);
+      return res.status(500).json({ success: false, message: 'Gagal memperbarui kata sandi di server.' });
+    }
+  });
+
+  // =========================================================================
+  // API ROUTE: USERS & PROFILES MANAGEMENT
+  // =========================================================================
+  app.get('/api/users', (req, res) => {
+    try {
+      const users = getAllUsers().map(({ password, ...rest }) => rest);
+      res.json({ success: true, users });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: 'Gagal memuat daftar pengguna.' });
+    }
+  });
+
+  app.get('/api/users/:username', (req, res) => {
+    try {
+      const user = getUserByUsername(req.params.username);
+      if (!user) {
+        return res.status(404).json({ success: false, message: 'Pengguna tidak ditemukan.' });
+      }
+      const { password, ...safeUser } = user;
+      res.json({ success: true, user: safeUser });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: 'Gagal memuat profil pengguna.' });
+    }
+  });
+
+  // Update Profile & Photo
+  app.put('/api/users/:username/profile', (req, res) => {
+    try {
+      const targetUsername = req.params.username;
+      const updates = req.body || {};
+      const clientIp = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress;
+
+      const result = updateUserProfile(targetUsername, updates, clientIp);
+      if (!result.success || !result.user) {
+        return res.status(400).json(result);
+      }
+
+      const { password, ...safeUser } = result.user;
+      const updatedSession = {
+        username: safeUser.username,
+        name: safeUser.name,
+        role: safeUser.role,
+        department: safeUser.department,
+        email: safeUser.email,
+        phone: safeUser.phone,
+        nik: safeUser.nik,
+        avatarUrl: safeUser.avatarUrl,
+        bio: safeUser.bio,
+        token: 'tok_' + Math.random().toString(36).substring(2) + Date.now().toString(36)
+      };
+
+      res.json({
+        success: true,
+        message: result.message,
+        user: safeUser,
+        session: updatedSession
+      });
+    } catch (err: any) {
+      console.error('Update profile error:', err);
+      res.status(500).json({ success: false, message: 'Gagal memperbarui profil pengguna di server.' });
+    }
+  });
+
+  // Update Avatar / Photo directly
+  app.post('/api/users/:username/avatar', (req, res) => {
+    try {
+      const targetUsername = req.params.username;
+      const { avatarUrl } = req.body || {};
+      const clientIp = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress;
+
+      if (!avatarUrl) {
+        return res.status(400).json({ success: false, message: 'Data foto profil wajib disertakan.' });
+      }
+
+      const result = updateUserPhoto(targetUsername, avatarUrl, clientIp);
+      if (!result.success || !result.user) {
+        return res.status(400).json(result);
+      }
+
+      const { password, ...safeUser } = result.user;
+      res.json({ success: true, message: 'Foto profil berhasil disimpan di database server.', user: safeUser });
+    } catch (err: any) {
+      console.error('Update avatar error:', err);
+      res.status(500).json({ success: false, message: 'Gagal memperbarui foto profil di server.' });
+    }
+  });
+
+  // Remove Avatar / Photo
+  app.delete('/api/users/:username/avatar', (req, res) => {
+    try {
+      const targetUsername = req.params.username;
+      const clientIp = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress;
+
+      const result = removeUserPhoto(targetUsername, clientIp);
+      if (!result.success || !result.user) {
+        return res.status(400).json(result);
+      }
+
+      const { password, ...safeUser } = result.user;
+      res.json({ success: true, message: 'Foto profil berhasil dihapus dari database server.', user: safeUser });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: 'Gagal menghapus foto profil di server.' });
+    }
+  });
+
+  // Create User Account
+  app.post('/api/users', (req, res) => {
+    try {
+      const userData = req.body || {};
+      if (!userData.username || !userData.password || !userData.name) {
+        return res.status(400).json({ success: false, message: 'Username, password, dan nama lengkap wajib diisi.' });
+      }
+
+      const clientIp = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress;
+      const result = createNewUser(userData, req.body.creatorUsername || 'admin', clientIp);
+      if (!result.success || !result.user) {
+        return res.status(400).json(result);
+      }
+
+      const { password, ...safeUser } = result.user;
+      res.json({ success: true, message: result.message, user: safeUser });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: 'Gagal membuat akun baru.' });
+    }
+  });
+
+  // Delete User Account
+  app.delete('/api/users/:username', (req, res) => {
+    try {
+      const targetUsername = req.params.username;
+      const clientIp = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress;
+      const result = deleteUser(targetUsername, 'admin', clientIp);
+      if (!result.success) {
+        return res.status(400).json(result);
+      }
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: 'Gagal menghapus akun pengguna.' });
+    }
+  });
+
+  // =========================================================================
+  // API ROUTE: SYSTEM CONFIGURATION (SMTP / SYNC / E-SIGN)
+  // =========================================================================
+  app.get('/api/system/config', (req, res) => {
+    try {
+      const config = getSystemConfig();
+      res.json({ success: true, config });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: 'Gagal memuat konfigurasi sistem.' });
+    }
+  });
+
+  app.put('/api/system/config', (req, res) => {
+    try {
+      const updates = req.body || {};
+      const clientIp = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress;
+      const result = updateSystemConfig(updates, updates.username || 'admin', clientIp);
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: 'Gagal menyimpan konfigurasi sistem.' });
+    }
+  });
+
+  // =========================================================================
+  // API ROUTE: ACTIVITY & EMAIL LOGS
+  // =========================================================================
+  app.get('/api/system/activity-logs', (req, res) => {
+    try {
+      const limit = Number(req.query.limit) || 50;
+      const logs = getActivityLogs(limit);
+      res.json({ success: true, logs });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: 'Gagal memuat log aktivitas.' });
+    }
+  });
+
+  app.get('/api/system/email-logs', (req, res) => {
+    try {
+      const limit = Number(req.query.limit) || 50;
+      const logs = getEmailLogs(limit);
+      res.json({ success: true, logs });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: 'Gagal memuat riwayat pengiriman email.' });
+    }
   });
 
   // =========================================================================
@@ -207,11 +496,34 @@ async function startServer() {
 
       const recipientStr = Array.isArray(to) ? to.join(', ') : to;
       const responseMessage = `Laporan resmi berhasil dikirimkan langsung dari sistem ke ${recipientStr}${attachments.length ? ' beserta lampiran dokumen PDF resmi' : ''}.`;
+      const msgId = info.messageId || `MSG-${Date.now()}`;
+
+      // Persist in Email & Activity Database
+      addEmailLog({
+        recipient: recipientStr,
+        cc: cc ? (Array.isArray(cc) ? cc.join(', ') : cc) : undefined,
+        bcc: bcc ? (Array.isArray(bcc) ? bcc.join(', ') : bcc) : undefined,
+        subject,
+        senderName: senderName || defaultSenderName,
+        senderEmail: senderEmail || defaultSenderEmail,
+        messageId: msgId,
+        hasAttachment: attachments.length > 0,
+        status: 'SENT',
+        previewUrl: previewUrl || undefined
+      });
+
+      const clientIp = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress;
+      addActivityLog(
+        senderEmail || 'system',
+        'EMAIL_SENT',
+        `Mengirim laporan resmi via Direct Dispatch ke ${recipientStr} (Subjek: ${subject})`,
+        clientIp
+      );
 
       return res.json({
         success: true,
         message: responseMessage,
-        messageId: info.messageId || `MSG-${Date.now()}`,
+        messageId: msgId,
         previewUrl: previewUrl || undefined,
         recipient: recipientStr,
         timestamp: new Date().toISOString(),
@@ -219,6 +531,21 @@ async function startServer() {
       });
     } catch (err: any) {
       console.error('Error sending email directly from system:', err);
+
+      try {
+        const { to, subject, senderName, senderEmail } = req.body || {};
+        const recipientStr = Array.isArray(to) ? to.join(', ') : (to || 'Unknown');
+        addEmailLog({
+          recipient: recipientStr,
+          subject: subject || 'Laporan Multi-Skill',
+          senderName: senderName || 'System',
+          senderEmail: senderEmail || 'system@ajinomoto.co.id',
+          messageId: `ERR-${Date.now()}`,
+          hasAttachment: false,
+          status: 'FAILED'
+        });
+      } catch (_) {}
+
       return res.status(500).json({
         success: false,
         message: `Gagal mengirim email langsung: ${err?.message || 'Terjadi gangguan koneksi ke server email'}`

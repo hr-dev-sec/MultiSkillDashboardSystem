@@ -50,7 +50,7 @@ export interface UserSession {
 
 export interface UserAccount {
   username: string;
-  password: string;
+  password?: string;
   name: string;
   role: string;
   department: string;
@@ -59,6 +59,61 @@ export interface UserAccount {
   nik?: string;
   avatarUrl?: string;
   bio?: string;
+  signatureImage?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  lastLogin?: string;
+}
+
+export interface ActivityLog {
+  id: string;
+  timestamp: string;
+  username: string;
+  action: 'LOGIN_SUCCESS' | 'PROFILE_UPDATED' | 'PHOTO_UPDATED' | 'PASSWORD_CHANGED' | 'USER_CREATED' | 'USER_DELETED' | 'SETTINGS_SAVED' | 'EMAIL_SENT' | 'PERIOD_DUPLICATED' | 'DATABASE_EXPORTED';
+  details: string;
+  ip?: string;
+}
+
+export interface EmailLog {
+  id: string;
+  timestamp: string;
+  recipient: string;
+  cc?: string;
+  bcc?: string;
+  subject: string;
+  senderName: string;
+  senderEmail: string;
+  messageId: string;
+  hasAttachment: boolean;
+  status: 'SENT' | 'FAILED';
+  previewUrl?: string;
+}
+
+export interface SystemConfig {
+  smtp: {
+    host: string;
+    port: number;
+    user: string;
+    pass: string;
+    fromName: string;
+    fromEmail: string;
+    secure: boolean;
+    enabled: boolean;
+  };
+  googleSheetUrl: string;
+  eSignApprover: {
+    name: string;
+    role: string;
+    nik: string;
+    department: string;
+    defaultNote: string;
+  };
+  jobPositionTargets: {
+    LL_FOREMAN: number;
+    ASM_SM: number;
+    DEPT_MGR_UP: number;
+  };
+  updatedAt: string;
 }
 
 export interface PeriodsData {

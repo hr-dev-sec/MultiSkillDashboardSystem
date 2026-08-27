@@ -9,7 +9,10 @@ import {
   PositionStat,
   GroupStat,
   AppFiltersState,
-  JobPositionCategory
+  JobPositionCategory,
+  SystemConfig,
+  ActivityLog,
+  EmailLog
 } from '../types';
 import {
   INITIAL_USERS,
@@ -20,6 +23,12 @@ import {
   generateInitialEmployees,
   calculateEmployeeScore
 } from '../data/initialData';
+import {
+  fetchSystemInit,
+  serverLogin,
+  updateServerUserProfile,
+  serverChangePassword
+} from './systemDbService';
 
 export { calculateEmployeeScore };
 import { jsPDF } from 'jspdf';
@@ -117,6 +126,47 @@ export function saveStoredUsers(users: UserAccount[]): void {
   }
 }
 
+/**
+ * Synchronize users and system settings from Server Database.
+ * Runs on boot and on demand.
+ */
+export async function syncSystemFromBackend(): Promise<{ users: UserAccount[]; config?: SystemConfig } | null> {
+  try {
+    const initData = await fetchSystemInit();
+    if (initData && initData.users && initData.users.length > 0) {
+      saveStoredUsers(initData.users);
+
+      // If active session exists, refresh with latest profile details from server
+      const currentSession = getStoredSession();
+      if (currentSession && currentSession.username) {
+        const matchingUser = initData.users.find(
+          (u) => u.username.trim().toLowerCase() === currentSession.username.trim().toLowerCase()
+        );
+        if (matchingUser) {
+          const refreshedSession: UserSession = {
+            ...currentSession,
+            name: matchingUser.name || currentSession.name,
+            role: matchingUser.role || currentSession.role,
+            department: matchingUser.department || currentSession.department,
+            email: matchingUser.email || currentSession.email,
+            phone: matchingUser.phone || currentSession.phone,
+            nik: matchingUser.nik || currentSession.nik,
+            avatarUrl: matchingUser.avatarUrl !== undefined ? matchingUser.avatarUrl : currentSession.avatarUrl,
+            bio: matchingUser.bio !== undefined ? matchingUser.bio : currentSession.bio
+          };
+          saveStoredSession(refreshedSession);
+        }
+      }
+
+      return { users: initData.users, config: initData.config };
+    }
+    return null;
+  } catch (err) {
+    console.warn('System sync from backend skipped:', err);
+    return null;
+  }
+}
+
 export function getStoredSession(): UserSession | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.SESSION);
@@ -152,6 +202,40 @@ export function clearSession(): void {
   }
 }
 
+/**
+ * Check Login with Server Authentication first, fallback to local cache
+ */
+export async function checkLoginAsync(
+  username: string,
+  password: string
+): Promise<{ success: boolean; message?: string; session?: UserSession }> {
+  try {
+    const serverRes = await serverLogin(username.trim(), password);
+    if (serverRes.success && serverRes.session) {
+      saveStoredSession(serverRes.session);
+      // Refresh local users list
+      if (serverRes.user) {
+        const users = getStoredUsers();
+        const idx = users.findIndex(
+          (u) => u.username.trim().toLowerCase() === serverRes.user!.username.trim().toLowerCase()
+        );
+        if (idx !== -1) {
+          users[idx] = { ...users[idx], ...serverRes.user };
+        } else {
+          users.push(serverRes.user);
+        }
+        saveStoredUsers(users);
+      }
+      return { success: true, session: serverRes.session };
+    } else if (serverRes.message && !serverRes.message.includes('Gagal menghubungi')) {
+      return { success: false, message: serverRes.message };
+    }
+  } catch (_) {}
+
+  // Fallback to local check
+  return checkLogin(username, password);
+}
+
 export function checkLogin(username: string, password: string): { success: boolean; message?: string; session?: UserSession } {
   const users = getStoredUsers();
   const user = users.find((u) => u.username.trim().toLowerCase() === username.trim().toLowerCase() && u.password === password);
@@ -177,6 +261,24 @@ export function checkLogin(username: string, password: string): { success: boole
   return { success: true, session };
 }
 
+export async function changePasswordAsync(
+  username: string,
+  oldPw: string,
+  newPw: string
+): Promise<{ success: boolean; message: string }> {
+  try {
+    const serverRes = await serverChangePassword(username, oldPw, newPw);
+    if (serverRes.success) {
+      // Also update local cache
+      changePassword(username, oldPw, newPw);
+      return serverRes;
+    }
+    return serverRes;
+  } catch (_) {
+    return changePassword(username, oldPw, newPw);
+  }
+}
+
 export function changePassword(username: string, oldPw: string, newPw: string): { success: boolean; message: string } {
   const users = getStoredUsers();
   const idx = users.findIndex((u) => u.username.trim().toLowerCase() === username.trim().toLowerCase());
@@ -194,6 +296,30 @@ export function changePassword(username: string, oldPw: string, newPw: string): 
   users[idx].password = newPw;
   saveStoredUsers(users);
   return { success: true, message: 'Password berhasil diperbarui.' };
+}
+
+/**
+ * Asynchronously update user profile & photo in Server Database + Local Cache
+ */
+export async function updateUserProfileAsync(
+  oldUsername: string,
+  updatedData: Partial<UserAccount>
+): Promise<{ success: boolean; message: string; session?: UserSession; user?: UserAccount }> {
+  try {
+    const serverRes = await updateServerUserProfile(oldUsername, updatedData);
+    if (serverRes.success) {
+      // Update local storage
+      updateUserProfile(oldUsername, updatedData);
+      if (serverRes.session) {
+        saveStoredSession(serverRes.session);
+      }
+      return serverRes;
+    }
+    return serverRes;
+  } catch (err) {
+    // Fallback to local
+    return updateUserProfile(oldUsername, updatedData);
+  }
 }
 
 export function updateUserProfile(
@@ -234,6 +360,9 @@ export function updateUserProfile(
 
   users[idx] = mergedUser;
   saveStoredUsers(users);
+
+  // Trigger server sync in background if available
+  updateServerUserProfile(oldUsername, updatedData).catch(() => {});
 
   // Update active session
   const currentSession = getStoredSession();
