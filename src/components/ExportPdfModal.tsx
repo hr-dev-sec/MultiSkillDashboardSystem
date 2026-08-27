@@ -4,6 +4,7 @@ import { generateMultiSkillReportPdf } from '../utils/pdfExport';
 import { BULAN_LABELS } from '../data/initialData';
 import { computeDashboardStats } from '../utils/storage';
 import { ConfirmationModal } from './ConfirmationModal';
+import { buildGasEmailDraft, sendMultiSkillEmailReport, getSavedGasWebhookUrl, saveGasWebhookUrl } from '../utils/gasEmailService';
 import confetti from 'canvas-confetti';
 
 interface ExportPdfModalProps {
@@ -36,11 +37,14 @@ export const ExportPdfModal: React.FC<ExportPdfModalProps> = ({
   // Preview tab state: 'page1' | 'page2' | 'page3' | 'roster'
   const [activePreviewPage, setActivePreviewPage] = useState<'page1' | 'page2' | 'page3' | 'roster'>('page1');
 
-  // Email simulation state
+  // Email simulation / real GAS webhook state
   const [isEmailRowOpen, setIsEmailRowOpen] = useState(false);
   const [emailInput, setEmailInput] = useState('');
   const [isSendingEmail, setIsSendingEmail] = useState(false);
   const [emailAlert, setEmailAlert] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [showEmailPreview, setShowEmailPreview] = useState(false);
+  const [gasWebhookUrl, setGasWebhookUrlState] = useState(getSavedGasWebhookUrl());
+  const [showWebhookConfig, setShowWebhookConfig] = useState(false);
 
   // Loading generation state
   const [isGenerating, setIsGenerating] = useState(false);
@@ -62,6 +66,15 @@ export const ExportPdfModal: React.FC<ExportPdfModalProps> = ({
   const divStr = filters.divisi.join(', ') || '';
   const deptStr = filters.department.join(', ') || '';
   const jabStr = filters.jabatan.join(', ') || '';
+
+  const emailDraftPayload = buildGasEmailDraft({
+    toEmail: emailInput || 'pimpinan@ajinomoto.co.id',
+    targetData,
+    filters,
+    currentUser,
+    signerName,
+    signerRole
+  });
 
   const handleDownloadPdf = () => {
     setIsGenerating(true);
@@ -99,24 +112,40 @@ export const ExportPdfModal: React.FC<ExportPdfModalProps> = ({
     }, 400);
   };
 
-  const handleSendEmail = () => {
+  const handleSendEmail = async () => {
     setEmailAlert(null);
-    if (!emailInput || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailInput)) {
-      setEmailAlert({ type: 'error', message: 'Masukkan alamat email tujuan yang valid.' });
+    if (!emailInput || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailInput.trim())) {
+      setEmailAlert({ type: 'error', message: 'Masukkan alamat email penerima / pimpinan yang valid.' });
       return;
     }
 
     setIsSendingEmail(true);
-    setTimeout(() => {
-      setIsSendingEmail(false);
+    const payload = buildGasEmailDraft({
+      toEmail: emailInput.trim(),
+      targetData,
+      filters,
+      currentUser,
+      signerName,
+      signerRole
+    });
+
+    const res = await sendMultiSkillEmailReport(payload);
+    setIsSendingEmail(false);
+
+    if (res.success) {
       setEmailAlert({
         type: 'success',
-        message: `Laporan PDF Multi-Skill format GAS resmi berhasil dikirimkan ke ${emailInput} lengkap dengan cap verifikasi digital.`
+        message: res.message
       });
       try {
         confetti({ particleCount: 50, spread: 60, origin: { y: 0.7 } });
       } catch (_) {}
-    }, 750);
+    } else {
+      setEmailAlert({
+        type: 'error',
+        message: res.message
+      });
+    }
   };
 
   return (
@@ -563,32 +592,114 @@ export const ExportPdfModal: React.FC<ExportPdfModalProps> = ({
         <div className="px-5 sm:px-6 py-3.5 border-t border-slate-200 dark:border-slate-800 shrink-0 space-y-3 bg-white dark:bg-slate-900">
           {/* Optional Email Row */}
           {isEmailRowOpen && (
-            <div className="flex gap-2 items-center flex-wrap animate-fadeIn">
-              <input
-                type="email"
-                value={emailInput}
-                onChange={(e) => setEmailInput(e.target.value)}
-                placeholder="Masukkan alamat email pimpinan/tujuan..."
-                className="input-elegant flex-1 min-w-[240px] px-3 py-2 outline-none text-xs sm:text-sm text-slate-800 dark:text-slate-100"
-              />
-              <button
-                type="button"
-                onClick={handleSendEmail}
-                disabled={isSendingEmail}
-                className="btn-navy px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-2 whitespace-nowrap cursor-pointer disabled:opacity-60"
-              >
-                {isSendingEmail ? (
-                  <>
-                    <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
-                    <span>Mengirim...</span>
-                  </>
-                ) : (
-                  <>
-                    <i className="fa-solid fa-paper-plane text-xs"></i>
-                    <span>Kirim Sekarang</span>
-                  </>
-                )}
-              </button>
+            <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 space-y-3 animate-fadeIn">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="w-7 h-7 rounded-lg bg-blue-100 dark:bg-blue-950 text-blue-600 dark:text-blue-400 flex items-center justify-center text-xs font-bold">
+                    <i className="fa-solid fa-paper-plane"></i>
+                  </span>
+                  <div>
+                    <p className="text-xs font-bold text-slate-800 dark:text-slate-100">
+                      Pengiriman Laporan Resmi Standar GAS (Google Apps Script)
+                    </p>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Email Pengirim: <strong className="text-slate-700 dark:text-slate-200">{currentUser.email || 'mahmudnurdiansyah4@gmail.com'}</strong> ({signerName})
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowEmailPreview(!showEmailPreview)}
+                    className="text-[11px] font-semibold text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 cursor-pointer"
+                  >
+                    <i className="fa-regular fa-eye text-[10px]"></i>
+                    <span>{showEmailPreview ? 'Sembunyikan Draf' : 'Lihat Redaksional Email'}</span>
+                  </button>
+                  <span className="text-slate-300 dark:text-slate-700">&bull;</span>
+                  <button
+                    type="button"
+                    onClick={() => setShowWebhookConfig(!showWebhookConfig)}
+                    className="text-[11px] font-semibold text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 flex items-center gap-1 cursor-pointer"
+                  >
+                    <i className="fa-solid fa-gear text-[10px]"></i>
+                    <span>GAS Webhook</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Webhook Configuration Panel (Optional) */}
+              {showWebhookConfig && (
+                <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 space-y-2 text-xs">
+                  <label className="block font-bold text-slate-700 dark:text-slate-300">
+                    URL Webhook Google Apps Script (Opsional untuk pengiriman direct serverless):
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="url"
+                      value={gasWebhookUrl}
+                      onChange={(e) => setGasWebhookUrlState(e.target.value)}
+                      placeholder="https://script.google.com/macros/s/.../exec"
+                      className="input-elegant flex-1 px-3 py-1.5 font-mono text-xs"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        saveGasWebhookUrl(gasWebhookUrl);
+                        setEmailAlert({ type: 'success', message: 'URL Webhook Google Apps Script berhasil disimpan.' });
+                      }}
+                      className="btn-navy px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer"
+                    >
+                      Simpan
+                    </button>
+                  </div>
+                  <p className="text-[10.5px] text-slate-400">
+                    Jika webhook kosong, sistem akan langsung membuka client email/Gmail resmi dengan subjek dan format redaksional standar GAS.
+                  </p>
+                </div>
+              )}
+
+              {/* Redaksional Email Preview */}
+              {showEmailPreview && (
+                <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 space-y-2 text-xs">
+                  <div className="flex items-center justify-between text-[11px] font-bold text-slate-500 border-b border-slate-100 dark:border-slate-800 pb-1.5">
+                    <span>Subjek: {emailDraftPayload.subject}</span>
+                    <span className="text-emerald-600 font-mono">Format GAS Standar</span>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-slate-950 font-mono text-[11px] text-slate-700 dark:text-slate-300 whitespace-pre-wrap max-h-40 overflow-y-auto leading-relaxed border border-slate-200 dark:border-slate-800">
+                    {emailDraftPayload.plainTextBody}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-2 items-center flex-wrap">
+                <input
+                  type="email"
+                  value={emailInput}
+                  onChange={(e) => setEmailInput(e.target.value)}
+                  placeholder="Masukkan alamat email pimpinan/tujuan (contoh: manager.hr@ajinomoto.co.id)..."
+                  className="input-elegant flex-1 min-w-[260px] px-3 py-2 outline-none text-xs sm:text-sm text-slate-800 dark:text-slate-100"
+                />
+                <button
+                  type="button"
+                  onClick={handleSendEmail}
+                  disabled={isSendingEmail}
+                  className="btn-navy px-5 py-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-2 whitespace-nowrap cursor-pointer disabled:opacity-60 shadow-sm hover:opacity-95"
+                >
+                  {isSendingEmail ? (
+                    <>
+                      <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                      <span>Mengirim Laporan...</span>
+                    </>
+                  ) : (
+                    <>
+                      <i className="fa-solid fa-paper-plane text-xs"></i>
+                      <span>Kirim Laporan Resmi</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           )}
 
