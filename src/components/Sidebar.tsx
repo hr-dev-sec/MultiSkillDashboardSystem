@@ -311,6 +311,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     src={currentUser.avatarUrl}
                     alt={currentUser.name}
                     className="w-9 h-9 rounded-lg object-cover shadow-sm shrink-0 ring-1 ring-amber-400/40"
+                    style={{ imageRendering: '-webkit-optimize-contrast' }}
                     onError={(e) => {
                       (e.target as HTMLElement).style.display = 'none';
                     }}
@@ -335,6 +336,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     src={currentUser.avatarUrl}
                     alt={currentUser.name}
                     className="w-10 h-10 rounded-xl object-cover shadow-md cursor-default ring-2 ring-amber-400/40"
+                    style={{ imageRendering: '-webkit-optimize-contrast' }}
                   />
                   <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-white dark:border-slate-900" />
                 </div>

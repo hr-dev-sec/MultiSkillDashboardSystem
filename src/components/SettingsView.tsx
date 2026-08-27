@@ -21,6 +21,8 @@ import { SmtpConfig, getSavedSmtpConfig, saveSmtpConfig, testSmtpConnection } fr
 import { ExportExcelConfirmModal } from './ExportExcelConfirmModal';
 import { ExportPdfModal } from './ExportPdfModal';
 import { ConfirmationModal, ConfirmationVariant } from './ConfirmationModal';
+import { HdPhotoModal } from './HdPhotoModal';
+import { optimizeImageToHd } from '../utils/imageOptimizer';
 import confetti from 'canvas-confetti';
 
 interface SettingsViewProps {
@@ -80,6 +82,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordAlert, setPasswordAlert] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [isSubmittingPassword, setIsSubmittingPassword] = useState(false);
+
+  // HD Avatar & Preview State
+  const [isOptimizingImage, setIsOptimizingImage] = useState(false);
+  const [isHdPreviewOpen, setIsHdPreviewOpen] = useState(false);
 
   // System Database Users & Audit Logs State
   const [systemUsers, setSystemUsers] = useState<UserAccount[]>(() => getStoredUsers());
@@ -359,26 +365,49 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     executeDuplicate();
   };
 
-  // Handle Profile Avatar File Change
-  const handleAvatarFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Handle Profile Avatar File Change with HD Enhancement
+  const handleAvatarFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (!file.type.startsWith('image/')) {
       setProfileAlert({ type: 'error', message: 'Silakan pilih file gambar yang valid (PNG, JPG, JPEG, WEBP).' });
       return;
     }
-    if (file.size > 2.5 * 1024 * 1024) {
-      setProfileAlert({ type: 'error', message: 'Ukuran file foto maksimal 2.5 MB.' });
+    if (file.size > 15 * 1024 * 1024) {
+      setProfileAlert({ type: 'error', message: 'Ukuran file foto maksimal 15 MB.' });
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        setAdminAvatarUrl(reader.result);
-        setProfileAlert(null);
-      }
-    };
-    reader.readAsDataURL(file);
+
+    setIsOptimizingImage(true);
+    setProfileAlert(null);
+
+    try {
+      // Process to High-Definition with bicubic anti-aliasing and sharpening filter
+      const result = await optimizeImageToHd(file, {
+        maxDimension: 1200, // 1200px crystal-clear HD
+        quality: 0.96, // high fidelity
+        sharpen: true, // sharpen logo/facial details
+        forceSquare: false
+      });
+
+      setAdminAvatarUrl(result.dataUrl);
+      setIsOptimizingImage(false);
+      setProfileAlert({
+        type: 'success',
+        message: `Foto HD berhasil diproses (${result.width}×${result.height} px). Klik "Simpan Perubahan Profil" untuk menyimpan permanen.`
+      });
+    } catch (err: any) {
+      setIsOptimizingImage(false);
+      // Fallback to standard FileReader if canvas optimization is not supported
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === 'string') {
+          setAdminAvatarUrl(reader.result);
+          setProfileAlert(null);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   // Handle Profile Submit
@@ -475,20 +504,40 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <div className="flex items-start gap-4">
             <div className="relative group shrink-0">
               {adminAvatarUrl ? (
-                <img
-                  src={adminAvatarUrl}
-                  alt={adminName}
-                  className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl object-cover shadow-md ring-4 ring-amber-400/30"
-                />
+                <div
+                  onClick={() => setIsHdPreviewOpen(true)}
+                  className="relative cursor-pointer group/avatar"
+                  title="Klik untuk melihat foto profil dalam resolusi HD Ultra-Clear"
+                >
+                  <img
+                    src={adminAvatarUrl}
+                    alt={adminName}
+                    className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl object-cover shadow-md ring-4 ring-amber-400/30 transition-transform duration-200 group-hover/avatar:scale-105"
+                    style={{ imageRendering: '-webkit-optimize-contrast' }}
+                  />
+                  <div className="absolute inset-0 rounded-2xl bg-black/40 opacity-0 group-hover/avatar:opacity-100 flex items-center justify-center transition-opacity text-white text-xs font-bold gap-1 backdrop-blur-2xs">
+                    <i className="fa-solid fa-magnifying-glass-plus text-sm text-amber-300"></i>
+                    <span className="text-[10px]">Lihat HD</span>
+                  </div>
+                  <span className="absolute -top-1.5 -left-1.5 px-1.5 py-0.5 rounded-md bg-amber-500 text-[9px] font-black text-slate-950 shadow-sm border border-amber-300 tracking-wider flex items-center gap-0.5">
+                    <i className="fa-solid fa-gem text-[7.5px]"></i> HD
+                  </span>
+                </div>
               ) : (
                 <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-gradient-to-br from-amber-400 to-amber-600 text-slate-950 font-black flex items-center justify-center text-xl sm:text-2xl shadow-md ring-4 ring-amber-400/30">
                   {userInitial}
                 </div>
               )}
+              {isOptimizingImage && (
+                <div className="absolute inset-0 rounded-2xl bg-slate-950/80 backdrop-blur-xs flex flex-col items-center justify-center text-white text-center p-1 z-10 animate-fadeIn">
+                  <span className="w-5 h-5 border-2 border-amber-400/30 border-t-amber-400 rounded-full animate-spin mb-1"></span>
+                  <span className="text-[9px] font-bold text-amber-300 leading-tight">Proses HD...</span>
+                </div>
+              )}
               <label
                 htmlFor="avatar-upload-input"
                 className="absolute -bottom-1 -right-1 w-7 h-7 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full flex items-center justify-center shadow-lg cursor-pointer transition-transform hover:scale-110"
-                title="Unggah Foto Profil Baru"
+                title="Unggah Foto Profil Baru (Mendukung Resolusi HD hingga 15MB)"
               >
                 <i className="fa-solid fa-camera text-xs"></i>
                 <input
@@ -518,16 +567,25 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 <span className="text-slate-300 dark:text-slate-600">•</span>
                 <span className="font-mono text-indigo-600 dark:text-cyan-400">NIK: {adminNik}</span>
               </p>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2.5 flex-wrap">
                 <label
                   htmlFor="avatar-upload-input"
                   className="text-xs font-semibold text-indigo-600 dark:text-cyan-400 hover:underline cursor-pointer flex items-center gap-1"
                 >
                   <i className="fa-solid fa-arrow-up-from-bracket text-[10px]"></i>
-                  <span>Ganti Foto</span>
+                  <span>Ganti Foto (HD)</span>
                 </label>
                 {adminAvatarUrl && (
                   <>
+                    <span className="text-slate-300 dark:text-slate-600">•</span>
+                    <button
+                      type="button"
+                      onClick={() => setIsHdPreviewOpen(true)}
+                      className="text-xs font-semibold text-amber-600 dark:text-amber-400 hover:underline cursor-pointer flex items-center gap-1"
+                    >
+                      <i className="fa-solid fa-expand text-[10px]"></i>
+                      <span>Pratinjau HD</span>
+                    </button>
                     <span className="text-slate-300 dark:text-slate-600">•</span>
                     <button
                       type="button"
@@ -1691,6 +1749,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </div>
       )}
+      {/* Modal HD Photo Viewer */}
+      <HdPhotoModal
+        isOpen={isHdPreviewOpen}
+        onClose={() => setIsHdPreviewOpen(false)}
+        imageUrl={adminAvatarUrl}
+        userName={adminName}
+        userRole={adminRole}
+        userDepartment={adminDepartment}
+      />
     </div>
   );
 };

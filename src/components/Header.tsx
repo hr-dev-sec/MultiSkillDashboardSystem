@@ -183,6 +183,7 @@ export const Header: React.FC<HeaderProps> = ({
               src={currentUser.avatarUrl}
               alt={currentUser.name}
               className="h-9 w-9 sm:h-10 sm:w-10 rounded-xl object-cover shadow-sm shrink-0 ring-2 ring-amber-400/40"
+              style={{ imageRendering: '-webkit-optimize-contrast' }}
               title={`${currentUser.name} (${currentUser.role})`}
               onError={(e) => {
                 // fallback to hidden if image fails
