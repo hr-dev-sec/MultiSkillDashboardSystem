@@ -37,8 +37,7 @@ const COLOR_BORDER: [number, number, number] = [226, 232, 240];   // #E2E8F0
 const COLOR_BG_ALT: [number, number, number] = [248, 250, 252];   // #F8FAFC
 
 /**
- * Generate official PDF Report matching the exact format of the previous Google Apps Script (GAS)
- * matching the user's template:
+ * Generate official PDF Report matching the corporate standards of PT Ajinomoto Indonesia:
  * - Page 1: Kop Banner Navy + Gold Stripe, 4 KPI Stat Cards, Filter Aktif, Rekap per Divisi, Rekap per Department
  * - Page 2: Continuation of Dept, Rekap per Grade, Rekap per Job Position
  * - Page 3: Official Electronic Sign-off (E-Signed Box, Date, HR Management, Team HR)

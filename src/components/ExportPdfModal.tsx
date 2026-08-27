@@ -1,10 +1,17 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Employee, AppFiltersState, UserSession } from '../types';
 import { generateMultiSkillReportPdf } from '../utils/pdfExport';
 import { BULAN_LABELS } from '../data/initialData';
 import { computeDashboardStats } from '../utils/storage';
 import { ConfirmationModal } from './ConfirmationModal';
-import { buildGasEmailDraft, sendMultiSkillEmailReport, getSavedGasWebhookUrl, saveGasWebhookUrl } from '../utils/gasEmailService';
+import {
+  EmailCustomContent,
+  getDefaultEmailContent,
+  buildMultiSkillEmailDraft,
+  sendMultiSkillEmailReport,
+  getSavedEmailWebhookUrl,
+  saveEmailWebhookUrl
+} from '../utils/emailReportService';
 import confetti from 'canvas-confetti';
 
 interface ExportPdfModalProps {
@@ -31,19 +38,32 @@ export const ExportPdfModal: React.FC<ExportPdfModalProps> = ({
   const [orientation, setOrientation] = useState<'portrait' | 'landscape'>('portrait');
   
   // Custom approver signatures
-  const [signerName, setSignerName] = useState(currentUser.name || 'Team HR');
-  const [signerRole, setSignerRole] = useState(currentUser.role || 'Admin');
+  const [signerName, setSignerName] = useState(currentUser.name || 'Mahmud Nurdiansyah');
+  const [signerRole, setSignerRole] = useState(currentUser.role || 'HR Development Specialist');
 
-  // Preview tab state: 'page1' | 'page2' | 'page3' | 'roster'
-  const [activePreviewPage, setActivePreviewPage] = useState<'page1' | 'page2' | 'page3' | 'roster'>('page1');
+  // Preview tab state: 'page1' | 'page2' | 'page3' | 'roster' | 'email'
+  const [activePreviewPage, setActivePreviewPage] = useState<'page1' | 'page2' | 'page3' | 'roster' | 'email'>('page1');
 
-  // Email simulation / real GAS webhook state
+  // Email Drawer / Editor state
   const [isEmailRowOpen, setIsEmailRowOpen] = useState(false);
-  const [emailInput, setEmailInput] = useState('');
   const [isSendingEmail, setIsSendingEmail] = useState(false);
   const [emailAlert, setEmailAlert] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
-  const [showEmailPreview, setShowEmailPreview] = useState(false);
-  const [gasWebhookUrl, setGasWebhookUrlState] = useState(getSavedGasWebhookUrl());
+  const [copiedEmailText, setCopiedEmailText] = useState(false);
+  
+  // Editable Email Content
+  const [emailContent, setEmailContent] = useState<EmailCustomContent>(() =>
+    getDefaultEmailContent({
+      targetData: filteredEmployees,
+      filters,
+      toEmail: 'pimpinan@ajinomoto.co.id'
+    })
+  );
+
+  // Email view sub-mode: 'edit' | 'visual_preview' | 'plain_preview'
+  const [emailViewMode, setEmailViewMode] = useState<'edit' | 'visual_preview' | 'plain_preview'>('visual_preview');
+
+  // Webhook configuration
+  const [emailWebhookUrl, setEmailWebhookUrlState] = useState(getSavedEmailWebhookUrl());
   const [showWebhookConfig, setShowWebhookConfig] = useState(false);
 
   // Loading generation state
@@ -51,6 +71,17 @@ export const ExportPdfModal: React.FC<ExportPdfModalProps> = ({
 
   // PDF Generation Error Modal State
   const [errorModalMsg, setErrorModalMsg] = useState<string | null>(null);
+
+  // Sync email default content when filters or scope change
+  useEffect(() => {
+    const targetData = scope === 'filtered' ? filteredEmployees : allEmployees;
+    const defaults = getDefaultEmailContent({ targetData, filters, toEmail: emailContent.toEmail });
+    // Update only if user hasn't heavily modified, or keep user edits
+    setEmailContent((prev) => ({
+      ...prev,
+      toEmail: prev.toEmail || defaults.toEmail
+    }));
+  }, [scope, filters, filteredEmployees, allEmployees]);
 
   if (!isOpen) return null;
 
@@ -67,14 +98,29 @@ export const ExportPdfModal: React.FC<ExportPdfModalProps> = ({
   const deptStr = filters.department.join(', ') || '';
   const jabStr = filters.jabatan.join(', ') || '';
 
-  const emailDraftPayload = buildGasEmailDraft({
-    toEmail: emailInput || 'pimpinan@ajinomoto.co.id',
+  const emailDraftPayload = buildMultiSkillEmailDraft({
     targetData,
     filters,
     currentUser,
-    signerName,
-    signerRole
+    customContent: emailContent
   });
+
+  const handleResetEmailToDefault = () => {
+    const defaultData = getDefaultEmailContent({ targetData, filters, toEmail: emailContent.toEmail });
+    setEmailContent(defaultData);
+    setEmailAlert({ type: 'success', message: 'Format redaksional email telah dikembalikan ke standar resmi.' });
+    setTimeout(() => setEmailAlert(null), 3000);
+  };
+
+  const handleCopyEmailText = async () => {
+    try {
+      await navigator.clipboard.writeText(emailDraftPayload.plainTextBody);
+      setCopiedEmailText(true);
+      setTimeout(() => setCopiedEmailText(false), 2500);
+    } catch (_) {
+      // Fallback
+    }
+  };
 
   const handleDownloadPdf = () => {
     setIsGenerating(true);
@@ -100,7 +146,7 @@ export const ExportPdfModal: React.FC<ExportPdfModalProps> = ({
           confetti({ particleCount: 70, spread: 80, origin: { y: 0.6 } });
         } catch (_) {}
 
-        const msg = `Berhasil mengunduh dokumen Laporan PDF (${result.pageCount} Halaman, ${result.rowCount} Karyawan) dengan format resmi Ajinomoto GAS.`;
+        const msg = `Berhasil mengunduh dokumen Laporan PDF (${result.pageCount} Halaman, ${result.rowCount} Karyawan) bertanda tangan resmi.`;
         if (onExportSuccess) {
           onExportSuccess(msg);
         }
@@ -114,19 +160,17 @@ export const ExportPdfModal: React.FC<ExportPdfModalProps> = ({
 
   const handleSendEmail = async () => {
     setEmailAlert(null);
-    if (!emailInput || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailInput.trim())) {
+    if (!emailContent.toEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailContent.toEmail.trim())) {
       setEmailAlert({ type: 'error', message: 'Masukkan alamat email penerima / pimpinan yang valid.' });
       return;
     }
 
     setIsSendingEmail(true);
-    const payload = buildGasEmailDraft({
-      toEmail: emailInput.trim(),
+    const payload = buildMultiSkillEmailDraft({
       targetData,
       filters,
       currentUser,
-      signerName,
-      signerRole
+      customContent: emailContent
     });
 
     const res = await sendMultiSkillEmailReport(payload);
@@ -149,448 +193,637 @@ export const ExportPdfModal: React.FC<ExportPdfModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[100] overflow-y-auto pt-8 pb-8 sm:pt-12 sm:pb-12 px-3 sm:px-6 flex items-start sm:items-center justify-center animate-fadeIn">
-      {/* Backdrop */}
-      <div
-        onClick={onClose}
-        className="fixed inset-0 bg-slate-950/80 dark:bg-black/85 backdrop-blur-xs transition-opacity"
-      />
-
-      {/* Modal Dialog Card */}
-      <div className="relative modal-panel bg-white dark:bg-slate-900 w-full max-w-4xl my-auto max-h-[92vh] sm:max-h-[88vh] flex flex-col overflow-hidden shadow-2xl z-10 border border-slate-200 dark:border-slate-800 animate-scaleUp">
-        {/* Header Letterhead */}
-        <div className="modal-header px-5 sm:px-6 py-4 flex items-start justify-between shrink-0 bg-gradient-to-r from-[#0E2340] via-[#173866] to-[#0E2340] text-white">
-          <div className="min-w-0 pr-4">
-            <div className="flex items-center gap-2 mb-1">
-              <span className="h-5 px-2 rounded bg-red-600 text-white font-black text-[9px] flex items-center justify-center tracking-wider">
-                AJINOMOTO
-              </span>
-              <span className="text-[10px] uppercase font-bold tracking-widest text-amber-300">
-                GAS System Standard Report
-              </span>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-slate-900/70 backdrop-blur-sm animate-fadeIn">
+      <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-5xl max-h-[94vh] flex flex-col overflow-hidden">
+        {/* Modal Header */}
+        <div className="px-5 sm:px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0 bg-gradient-to-r from-slate-50 via-white to-amber-50/30 dark:from-slate-900 dark:via-slate-900 dark:to-slate-800/50">
+          <div className="flex items-center gap-3">
+            <div
+              className="w-10 h-10 rounded-2xl flex items-center justify-center text-white shadow-md"
+              style={{ background: 'linear-gradient(135deg, #0E2340, #16345E)' }}
+            >
+              <i className="fa-solid fa-file-pdf text-amber-400 text-lg"></i>
             </div>
-            <h3 className="font-display font-extrabold text-base sm:text-lg text-white flex items-center gap-2 flex-wrap">
-              <span>Laporan Monitoring Multi-Skill Karyawan &amp; Manajer</span>
-              <span className="badge-pill bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 text-[9px] px-2 py-0.5 font-bold">
-                E-SIGNED
-              </span>
-            </h3>
-            <p className="text-xs text-white/80 mt-0.5">
-              Format, tata letak, dan struktur data identik 100% dengan dokumen Google Apps Script (GAS) Mojokerto Factory.
-            </p>
+            <div>
+              <h2 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <span>Pratinjau &amp; Distribusi Laporan Multi-Skill</span>
+                <span className="badge-pill bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 text-[11px] px-2 py-0.5 font-bold">
+                  E-SIGN OFFICIAL
+                </span>
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                PT Ajinomoto Indonesia &bull; Mojokerto Factory &bull; Format 3 Halaman Eksekutif &amp; Redaksional Email
+              </p>
+            </div>
           </div>
-
           <button
+            type="button"
             onClick={onClose}
-            className="text-white/80 hover:text-white h-8 w-8 flex items-center justify-center rounded-xl bg-white/10 hover:bg-white/20 shrink-0 transition cursor-pointer"
-            aria-label="Tutup"
+            className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400 flex items-center justify-center transition cursor-pointer"
           >
-            <i className="fa-solid fa-xmark text-base"></i>
+            <i className="fa-solid fa-xmark text-sm"></i>
           </button>
         </div>
 
-        {/* Content Body */}
-        <div className="flex-1 overflow-y-auto px-5 sm:px-6 py-4 space-y-4">
-          {/* Controls Bar */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50 dark:bg-slate-800/60 p-3 rounded-xl border border-slate-200 dark:border-slate-700">
-            {/* 1. Cakupan Data */}
-            <div>
-              <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Cakupan Data:
+        {/* Modal Body: Split into Left Config and Right Live Preview */}
+        <div className="flex-1 overflow-y-auto grid grid-cols-1 lg:grid-cols-12 min-h-0 divide-y lg:divide-y-0 lg:divide-x divide-slate-200 dark:divide-slate-800">
+          {/* Left Column: Configuration & E-Sign Settings (5 Cols) */}
+          <div className="lg:col-span-5 p-5 space-y-4 overflow-y-auto bg-slate-50/50 dark:bg-slate-900/50">
+            {/* Scope Selection */}
+            <div className="card-elegant p-4 space-y-2.5">
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-200 uppercase tracking-wider">
+                1. Cakupan Data Laporan
               </label>
-              <select
-                value={scope}
-                onChange={(e) => setScope(e.target.value as any)}
-                className="input-elegant w-full px-2.5 py-1.5 text-xs font-semibold bg-white dark:bg-slate-800"
-              >
-                <option value="filtered">Data Terfilter Saat Ini ({filteredEmployees.length} Karyawan)</option>
-                <option value="all">Seluruh Database Master ({allEmployees.length} Karyawan)</option>
-              </select>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setScope('filtered')}
+                  className={`p-2.5 rounded-xl text-left border transition text-xs font-semibold cursor-pointer ${
+                    scope === 'filtered'
+                      ? 'border-[#0E2340] dark:border-amber-400 bg-white dark:bg-slate-800 text-[#0E2340] dark:text-amber-300 shadow-sm'
+                      : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-white/60'
+                  }`}
+                >
+                  <p className="font-bold flex items-center justify-between">
+                    <span>Sesuai Filter Aktif</span>
+                    <i className="fa-solid fa-filter text-[10px]"></i>
+                  </p>
+                  <p className="text-[10.5px] text-slate-500 dark:text-slate-400 mt-0.5">
+                    {filteredEmployees.length} Karyawan ({blnStr} {thnStr})
+                  </p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setScope('all')}
+                  className={`p-2.5 rounded-xl text-left border transition text-xs font-semibold cursor-pointer ${
+                    scope === 'all'
+                      ? 'border-[#0E2340] dark:border-amber-400 bg-white dark:bg-slate-800 text-[#0E2340] dark:text-amber-300 shadow-sm'
+                      : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-white/60'
+                  }`}
+                >
+                  <p className="font-bold flex items-center justify-between">
+                    <span>Seluruh Database</span>
+                    <i className="fa-solid fa-database text-[10px]"></i>
+                  </p>
+                  <p className="text-[10.5px] text-slate-500 dark:text-slate-400 mt-0.5">
+                    {allEmployees.length} Total Rekam Data
+                  </p>
+                </button>
+              </div>
+
+              {scope === 'filtered' && (
+                <div className="p-2 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200/60 dark:border-amber-900/60 text-[11px] text-amber-800 dark:text-amber-300 space-y-0.5">
+                  <p className="font-bold flex items-center gap-1">
+                    <i className="fa-solid fa-circle-info text-[10px]"></i> Filter Parameter:
+                  </p>
+                  <p className="truncate">
+                    Periode: <strong>{blnStr} {thnStr}</strong> {divStr ? `| Divisi: ${divStr}` : ''} {deptStr ? `| Dept: ${deptStr}` : ''}
+                  </p>
+                </div>
+              )}
             </div>
 
-            {/* 2. Format / Tipe */}
-            <div>
-              <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Format Laporan:
+            {/* Quick KPI Stats Overview */}
+            <div className="card-elegant p-4 space-y-2">
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-200 uppercase tracking-wider">
+                2. Rekapitulasi Metrik PDF
               </label>
-              <select
-                value={reportType}
-                onChange={(e) => setReportType(e.target.value as any)}
-                className="input-elegant w-full px-2.5 py-1.5 text-xs font-semibold bg-white dark:bg-slate-800"
-              >
-                <option value="comprehensive">GAS Report Lengkap (3 Halaman + E-Sign)</option>
-                <option value="employee_detail">Sertakan Detail Roster Karyawan</option>
-              </select>
+              <div className="grid grid-cols-4 gap-2 text-center">
+                <div className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800">
+                  <p className="text-[10px] text-slate-500 uppercase font-semibold">Total</p>
+                  <p className="text-sm font-bold text-slate-800 dark:text-slate-100">{totalManpower}</p>
+                </div>
+                <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/50">
+                  <p className="text-[10px] text-emerald-600 dark:text-emerald-400 uppercase font-semibold">MS</p>
+                  <p className="text-sm font-bold text-emerald-600 dark:text-emerald-400">{totalMS}</p>
+                </div>
+                <div className="p-2 rounded-xl bg-rose-50 dark:bg-rose-950/50">
+                  <p className="text-[10px] text-rose-600 dark:text-rose-400 uppercase font-semibold">US</p>
+                  <p className="text-sm font-bold text-rose-600 dark:text-rose-400">{totalUS}</p>
+                </div>
+                <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-950/50">
+                  <p className="text-[10px] text-blue-600 dark:text-blue-400 uppercase font-semibold">% MS</p>
+                  <p className="text-sm font-bold text-blue-600 dark:text-blue-400">{pctFormatted}</p>
+                </div>
+              </div>
             </div>
 
-            {/* 3. Penandatangan (E-Sign) */}
-            <div>
-              <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Pejabat Penandatangan:
+            {/* Signer Customization */}
+            <div className="card-elegant p-4 space-y-3">
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-200 uppercase tracking-wider flex items-center justify-between">
+                <span>3. Pejabat Penanda Tangan (E-Sign)</span>
+                <span className="text-[10px] font-normal text-slate-400">Dicetak pada Lembar Hal. 3</span>
               </label>
-              <input
-                type="text"
-                value={signerName}
-                onChange={(e) => setSignerName(e.target.value)}
-                placeholder="Team HR / Nama Pejabat"
-                className="input-elegant w-full px-2.5 py-1.5 text-xs font-semibold bg-white dark:bg-slate-800"
-              />
+              <div className="space-y-2">
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-500 mb-0.5">Nama Approver / Penyusun:</label>
+                  <input
+                    type="text"
+                    value={signerName}
+                    onChange={(e) => setSignerName(e.target.value)}
+                    className="input-elegant w-full px-3 py-1.5 text-xs outline-none font-semibold text-slate-800 dark:text-slate-100"
+                    placeholder="Nama Penanda Tangan"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-500 mb-0.5">Jabatan / Role:</label>
+                  <input
+                    type="text"
+                    value={signerRole}
+                    onChange={(e) => setSignerRole(e.target.value)}
+                    className="input-elegant w-full px-3 py-1.5 text-xs outline-none text-slate-800 dark:text-slate-100"
+                    placeholder="Jabatan di HR"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Report Structure Information */}
+            <div className="p-3.5 rounded-2xl bg-blue-50/70 dark:bg-blue-950/30 border border-blue-200/80 dark:border-blue-900/60 text-xs space-y-1.5 text-slate-700 dark:text-slate-300">
+              <p className="font-bold text-[#0E2340] dark:text-blue-300 flex items-center gap-1.5">
+                <i className="fa-solid fa-layer-group text-blue-600"></i>
+                Struktur Dokumen Laporan Resmi:
+              </p>
+              <ul className="list-disc list-inside space-y-0.5 text-[11.5px] text-slate-600 dark:text-slate-400 pl-1">
+                <li><strong>Halaman 1:</strong> Kop Surat Banner Navy, Rekap KPI, Breakdown Divisi &amp; Dept.</li>
+                <li><strong>Halaman 2:</strong> Rekapitulasi per Grade &amp; Kategori Job Position.</li>
+                <li><strong>Halaman 3:</strong> Lembar Pengesahan Validasi Digital E-Sign HR Management.</li>
+              </ul>
             </div>
           </div>
 
-          {/* Interactive Document Simulator (Simulasi Kertas Laporan GAS) */}
-          <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-950 p-3 sm:p-4 space-y-3">
-            {/* Sheet Page Navigation Tabs */}
-            <div className="flex items-center justify-between flex-wrap gap-2">
-              <span className="text-xs font-extrabold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                <i className="fa-solid fa-file-pdf text-red-600"></i>
-                <span>Simulasi Lembar PDF (GAS Format):</span>
-              </span>
-
-              <div className="flex gap-1 bg-white dark:bg-slate-850 p-1 rounded-xl border border-slate-200 dark:border-slate-700 text-xs">
+          {/* Right Column: Interactive Live Preview & Email Editor (7 Cols) */}
+          <div className="lg:col-span-7 p-5 flex flex-col min-h-0 bg-white dark:bg-slate-900">
+            {/* Navigation Tabs */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800 shrink-0 gap-2 flex-wrap">
+              <div className="flex items-center gap-1.5 p-1 rounded-xl bg-slate-100 dark:bg-slate-800">
                 <button
                   type="button"
                   onClick={() => setActivePreviewPage('page1')}
-                  className={`px-3 py-1 rounded-lg font-bold transition cursor-pointer ${
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
                     activePreviewPage === 'page1'
-                      ? 'bg-[#0E2340] text-white shadow-xs'
-                      : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                      ? 'bg-white dark:bg-slate-900 text-[#0E2340] dark:text-white shadow-xs'
+                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
                   }`}
                 >
-                  Halaman 1
+                  Hal 1 (Div &amp; Dept)
                 </button>
                 <button
                   type="button"
                   onClick={() => setActivePreviewPage('page2')}
-                  className={`px-3 py-1 rounded-lg font-bold transition cursor-pointer ${
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
                     activePreviewPage === 'page2'
-                      ? 'bg-[#0E2340] text-white shadow-xs'
-                      : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                      ? 'bg-white dark:bg-slate-900 text-[#0E2340] dark:text-white shadow-xs'
+                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
                   }`}
                 >
-                  Halaman 2
+                  Hal 2 (Grade &amp; Job)
                 </button>
                 <button
                   type="button"
                   onClick={() => setActivePreviewPage('page3')}
-                  className={`px-3 py-1 rounded-lg font-bold transition cursor-pointer ${
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
                     activePreviewPage === 'page3'
-                      ? 'bg-[#0E2340] text-white shadow-xs'
-                      : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                      ? 'bg-white dark:bg-slate-900 text-[#0E2340] dark:text-white shadow-xs'
+                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
                   }`}
                 >
-                  Halaman 3 (E-Sign)
+                  Hal 3 (E-Sign)
                 </button>
-                {reportType === 'employee_detail' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActivePreviewPage('email');
+                    setIsEmailRowOpen(true);
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                    activePreviewPage === 'email'
+                      ? 'bg-[#0E2340] text-amber-300 shadow-sm'
+                      : 'text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40'
+                  }`}
+                >
+                  <i className="fa-regular fa-envelope text-[11px]"></i>
+                  <span>Redaksional Email</span>
+                </button>
+              </div>
+
+              {activePreviewPage === 'email' && (
+                <div className="flex items-center gap-1 text-[11px]">
                   <button
                     type="button"
-                    onClick={() => setActivePreviewPage('roster')}
-                    className={`px-3 py-1 rounded-lg font-bold transition cursor-pointer ${
-                      activePreviewPage === 'roster'
-                        ? 'bg-[#0E2340] text-white shadow-xs'
-                        : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                    onClick={() => setEmailViewMode('visual_preview')}
+                    className={`px-2 py-1 rounded-md font-semibold transition cursor-pointer ${
+                      emailViewMode === 'visual_preview' ? 'bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 font-bold' : 'text-slate-500 hover:text-slate-700'
                     }`}
                   >
-                    Roster Karyawan
+                    Visual
                   </button>
-                )}
-              </div>
+                  <button
+                    type="button"
+                    onClick={() => setEmailViewMode('edit')}
+                    className={`px-2 py-1 rounded-md font-semibold transition cursor-pointer ${
+                      emailViewMode === 'edit' ? 'bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 font-bold' : 'text-slate-500 hover:text-slate-700'
+                    }`}
+                  >
+                    <i className="fa-solid fa-pen-to-square text-[10px] mr-1"></i>Edit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEmailViewMode('plain_preview')}
+                    className={`px-2 py-1 rounded-md font-semibold transition cursor-pointer ${
+                      emailViewMode === 'plain_preview' ? 'bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 font-bold' : 'text-slate-500 hover:text-slate-700'
+                    }`}
+                  >
+                    Teks
+                  </button>
+                </div>
+              )}
             </div>
 
-            {/* Paper Container */}
-            <div className="bg-white text-slate-900 rounded-lg shadow-lg border border-slate-300 overflow-hidden font-sans text-xs min-h-[460px] flex flex-col justify-between">
-              <div>
-                {/* ================= PAGE 1 PREVIEW ================= */}
-                {activePreviewPage === 'page1' && (
-                  <div className="animate-fadeIn">
-                    {/* Header Banner */}
-                    <div className="bg-[#0E2340] text-white px-5 py-3.5 relative">
-                      <div className="flex items-center gap-3">
-                        {/* Logo */}
-                        <div className="shrink-0 flex flex-col items-center">
-                          <span className="text-[7px] text-white/90 italic">Eat Well, Live Well.</span>
-                          <div className="bg-red-600 text-white rounded px-2 py-0.5 font-bold text-xs flex items-center justify-center">
-                            Aj
-                          </div>
-                          <span className="text-[6px] font-black tracking-tighter text-white">AJINOMOTO</span>
+            {/* Preview Sheet Canvas / Email Viewer */}
+            <div className="flex-1 overflow-y-auto mt-3 p-4 rounded-2xl bg-slate-100/80 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 flex justify-center">
+              {activePreviewPage === 'email' ? (
+                /* EMAIL EDITOR & PREVIEW VIEW */
+                <div className="w-full max-w-xl space-y-3 animate-fadeIn">
+                  {emailViewMode === 'edit' ? (
+                    /* EDIT MODE */
+                    <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-3.5 text-xs">
+                      <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
+                        <span className="font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+                          <i className="fa-solid fa-pen text-blue-600"></i> Kustomisasi Redaksional Email Laporan
+                        </span>
+                        <button
+                          type="button"
+                          onClick={handleResetEmailToDefault}
+                          className="text-[11px] text-slate-500 hover:text-rose-600 flex items-center gap-1 cursor-pointer font-semibold"
+                          title="Kembalikan semua teks ke template standar"
+                        >
+                          <i className="fa-solid fa-arrow-rotate-left text-[10px]"></i> Reset Standar
+                        </button>
+                      </div>
+
+                      <div>
+                        <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Email Penerima (To):</label>
+                        <input
+                          type="email"
+                          value={emailContent.toEmail}
+                          onChange={(e) => setEmailContent({ ...emailContent, toEmail: e.target.value })}
+                          placeholder="contoh: pimpinan@ajinomoto.co.id, hr.manager@ajinomoto.co.id"
+                          className="input-elegant w-full px-3 py-2 text-xs font-semibold"
+                        />
+                        <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                          <span className="text-[10px] text-slate-400 font-semibold">Pilihan Cepat:</span>
+                          {['pimpinan@ajinomoto.co.id', 'hr.manager@ajinomoto.co.id', 'factory.head@ajinomoto.co.id'].map((em) => (
+                            <button
+                              key={em}
+                              type="button"
+                              onClick={() => setEmailContent({ ...emailContent, toEmail: em })}
+                              className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-blue-100 hover:text-blue-700 transition cursor-pointer font-mono"
+                            >
+                              {em}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Subjek Email:</label>
+                        <input
+                          type="text"
+                          value={emailContent.subject}
+                          onChange={(e) => setEmailContent({ ...emailContent, subject: e.target.value })}
+                          className="input-elegant w-full px-3 py-2 text-xs font-semibold text-slate-800 dark:text-slate-100"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Salam Pembuka / Kepada:</label>
+                        <input
+                          type="text"
+                          value={emailContent.salutation}
+                          onChange={(e) => setEmailContent({ ...emailContent, salutation: e.target.value })}
+                          className="input-elegant w-full px-3 py-2 text-xs text-slate-800 dark:text-slate-100"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Paragraf Pengantar:</label>
+                        <textarea
+                          rows={3}
+                          value={emailContent.mainParagraph}
+                          onChange={(e) => setEmailContent({ ...emailContent, mainParagraph: e.target.value })}
+                          className="input-elegant w-full px-3 py-2 text-xs text-slate-800 dark:text-slate-100 leading-relaxed"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
+                        <label className="flex items-center gap-2 cursor-pointer select-none text-xs font-semibold text-slate-700 dark:text-slate-200">
+                          <input
+                            type="checkbox"
+                            checked={emailContent.showStatsTable}
+                            onChange={(e) => setEmailContent({ ...emailContent, showStatsTable: e.target.checked })}
+                            className="rounded text-blue-600"
+                          />
+                          <span>Sertakan Tabel Statistik</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer select-none text-xs font-semibold text-slate-700 dark:text-slate-200">
+                          <input
+                            type="checkbox"
+                            checked={emailContent.showFilterLine}
+                            onChange={(e) => setEmailContent({ ...emailContent, showFilterLine: e.target.checked })}
+                            className="rounded text-blue-600"
+                          />
+                          <span>Sertakan Badge Parameter</span>
+                        </label>
+                      </div>
+
+                      <div>
+                        <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Catatan Tambahan (Opsional):</label>
+                        <input
+                          type="text"
+                          value={emailContent.additionalNotes || ''}
+                          onChange={(e) => setEmailContent({ ...emailContent, additionalNotes: e.target.value })}
+                          placeholder="Misal: Mohon verifikasi divisi MSG sebelum tanggal 10..."
+                          className="input-elegant w-full px-3 py-1.5 text-xs text-slate-800 dark:text-slate-100"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Kalimat Penutup:</label>
+                        <textarea
+                          rows={2}
+                          value={emailContent.closingParagraph}
+                          onChange={(e) => setEmailContent({ ...emailContent, closingParagraph: e.target.value })}
+                          className="input-elegant w-full px-3 py-1.5 text-xs text-slate-800 dark:text-slate-100 leading-relaxed"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Tanda Tangan Pengirim:</label>
+                        <textarea
+                          rows={3}
+                          value={emailContent.senderSign}
+                          onChange={(e) => setEmailContent({ ...emailContent, senderSign: e.target.value })}
+                          className="input-elegant w-full px-3 py-1.5 text-xs text-slate-800 dark:text-slate-100 font-mono"
+                        />
+                      </div>
+                    </div>
+                  ) : emailViewMode === 'plain_preview' ? (
+                    /* PLAIN TEXT PREVIEW */
+                    <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-2">
+                      <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800 text-xs">
+                        <span className="font-bold text-slate-700 dark:text-slate-200">Subjek: {emailDraftPayload.subject}</span>
+                        <button
+                          type="button"
+                          onClick={handleCopyEmailText}
+                          className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-200 font-semibold cursor-pointer flex items-center gap-1.5"
+                        >
+                          <i className={`fa-solid ${copiedEmailText ? 'fa-check text-emerald-600' : 'fa-copy'}`}></i>
+                          <span>{copiedEmailText ? 'Tersalin!' : 'Salin Teks'}</span>
+                        </button>
+                      </div>
+                      <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-950 font-mono text-[11px] text-slate-800 dark:text-slate-200 whitespace-pre-wrap leading-relaxed border border-slate-200 dark:border-slate-800 max-h-[380px] overflow-y-auto">
+                        {emailDraftPayload.plainTextBody}
+                      </div>
+                    </div>
+                  ) : (
+                    /* VISUAL HTML PREVIEW (Matches exactly the recipient email view) */
+                    <div className="rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-700 shadow-md bg-white text-slate-900 text-xs">
+                      {/* Email Header */}
+                      <div className="p-4 text-white flex items-center gap-3.5" style={{ background: 'linear-gradient(135deg, #0E2340, #16345E)' }}>
+                        <div className="w-10 h-10 rounded-lg bg-white p-1 flex items-center justify-center shrink-0">
+                          <img
+                            src="https://upload.wikimedia.org/wikipedia/commons/0/01/Ajinomoto_Group_Global_Brand_logo.png"
+                            alt="Logo"
+                            className="max-h-full max-w-full object-contain"
+                          />
                         </div>
                         <div>
-                          <h4 className="font-extrabold text-sm sm:text-base tracking-tight text-white">
-                            AJINOMOTO MOJOKERTO FACTORY
-                          </h4>
-                          <p className="text-[10px] text-slate-200">
-                            Laporan Monitoring Multi-Skill Karyawan &amp; Manajer
+                          <p className="text-[10px] tracking-wider text-slate-200 font-bold uppercase">
+                            PT AJINOMOTO INDONESIA — MOJOKERTO FACTORY
                           </p>
+                          <p className="text-sm font-extrabold text-white">Laporan Multi-Skill Monitoring</p>
                         </div>
                       </div>
-                      {/* Gold bottom stripe */}
-                      <div className="absolute bottom-0 left-0 right-0 h-1 bg-[#B8874B]" />
+
+                      {/* Email Body Content */}
+                      <div className="p-5 space-y-3.5 bg-white text-slate-700">
+                        <p className="font-semibold text-slate-900">{emailContent.salutation}</p>
+                        <p className="leading-relaxed">{emailContent.mainParagraph}</p>
+
+                        {/* Summary Table */}
+                        {emailContent.showStatsTable && (
+                          <div className="border border-slate-200 rounded-xl overflow-hidden my-3">
+                            <table className="w-full text-xs text-left">
+                              <tbody>
+                                <tr className="border-b border-slate-200 bg-slate-50">
+                                  <td className="p-2.5 text-slate-600">Total Karyawan</td>
+                                  <td className="p-2.5 text-right font-bold text-slate-900">{totalManpower}</td>
+                                </tr>
+                                <tr className="border-b border-slate-200">
+                                  <td className="p-2.5 text-slate-600">Standar (MS)</td>
+                                  <td className="p-2.5 text-right font-bold text-emerald-600">{totalMS}</td>
+                                </tr>
+                                <tr className="border-b border-slate-200 bg-slate-50">
+                                  <td className="p-2.5 text-slate-600">Belum Standar (US)</td>
+                                  <td className="p-2.5 text-right font-bold text-rose-600">{totalUS}</td>
+                                </tr>
+                                <tr>
+                                  <td className="p-2.5 text-slate-600">Pencapaian</td>
+                                  <td className="p-2.5 text-right font-bold text-slate-900">{pctFormatted}</td>
+                                </tr>
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+
+                        {emailContent.showFilterLine && (
+                          <div className="p-2 text-center rounded-xl border border-dashed border-amber-400 bg-amber-50 text-[11px] text-slate-600 font-semibold">
+                            Periode: {blnStr} {thnStr} | Divisi: {divStr || 'Semua Divisi'} | Dept: {deptStr || 'Semua Departemen'}
+                          </div>
+                        )}
+
+                        {emailContent.additionalNotes && (
+                          <div className="p-2.5 rounded-lg bg-slate-100 border-l-4 border-[#0E2340] text-[11px] text-slate-700">
+                            <strong>Catatan:</strong> {emailContent.additionalNotes}
+                          </div>
+                        )}
+
+                        <p className="text-[11px] text-slate-500 leading-relaxed">
+                          Laporan ini dihasilkan secara otomatis oleh sistem pada {new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}, sebagai bagian dari proses monitoring kompetensi multi-skill karyawan di lingkungan Ajinomoto Mojokerto Factory.
+                        </p>
+
+                        <p className="text-xs text-slate-600">{emailContent.closingParagraph}</p>
+
+                        <div className="pt-3 border-t border-slate-200 text-xs leading-relaxed">
+                          <p className="text-slate-500">Hormat kami,</p>
+                          <p className="font-extrabold text-[#0E2340]">Sistem Multi-Skill Monitoring</p>
+                          <p className="text-slate-600">HR Development Section</p>
+                          <p className="text-slate-600">PT Ajinomoto Indonesia — Mojokerto Factory</p>
+                        </div>
+                      </div>
+
+                      {/* Email Footer */}
+                      <div className="p-3 bg-slate-100 border-t border-slate-200 text-[10.5px] text-slate-400 text-center">
+                        Email ini dikirimkan secara otomatis oleh sistem, mohon tidak membalas ke alamat ini.
+                      </div>
                     </div>
-
-                    <div className="p-4 space-y-3.5">
-                      {/* 4 KPI Cards */}
-                      <div className="grid grid-cols-4 gap-2">
-                        {/* Card 1 */}
-                        <div className="bg-white rounded border border-slate-200 p-2 relative overflow-hidden shadow-2xs">
-                          <div className="absolute left-0 top-0 bottom-0 w-1 bg-[#0E2340]" />
-                          <div className="pl-1">
-                            <p className="text-base font-black text-slate-900 leading-tight">{totalManpower}</p>
-                            <p className="text-[9px] text-slate-500 font-semibold">Total Karyawan</p>
-                          </div>
-                        </div>
-                        {/* Card 2 */}
-                        <div className="bg-white rounded border border-slate-200 p-2 relative overflow-hidden shadow-2xs">
-                          <div className="absolute left-0 top-0 bottom-0 w-1 bg-[#10B981]" />
-                          <div className="pl-1">
-                            <p className="text-base font-black text-slate-900 leading-tight">{totalMS}</p>
-                            <p className="text-[9px] text-slate-500 font-semibold">Standar (MS)</p>
-                          </div>
-                        </div>
-                        {/* Card 3 */}
-                        <div className="bg-white rounded border border-slate-200 p-2 relative overflow-hidden shadow-2xs">
-                          <div className="absolute left-0 top-0 bottom-0 w-1 bg-[#EF4444]" />
-                          <div className="pl-1">
-                            <p className="text-base font-black text-slate-900 leading-tight">{totalUS}</p>
-                            <p className="text-[9px] text-slate-500 font-semibold">Belum Standar (US)</p>
-                          </div>
-                        </div>
-                        {/* Card 4 */}
-                        <div className="bg-white rounded border border-slate-200 p-2 relative overflow-hidden shadow-2xs">
-                          <div className="absolute left-0 top-0 bottom-0 w-1 bg-[#B8874B]" />
-                          <div className="pl-1">
-                            <p className="text-base font-black text-slate-900 leading-tight">{pctFormatted}</p>
-                            <p className="text-[9px] text-slate-500 font-semibold">Pencapaian</p>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Filter Aktif Line */}
-                      <div className="text-[10px]">
-                        <p className="font-bold text-[#B8874B]">FILTER AKTIF</p>
-                        <p className="text-slate-700">
-                          Tahun: {thnStr} | Bulan: {blnStr} | Divisi: {divStr} | Department: {deptStr} | Jabatan: {jabStr}
+                  )}
+                </div>
+              ) : (
+                /* PDF DOCUMENT PREVIEW CANVAS */
+                <div className="w-full max-w-md bg-white text-slate-800 shadow-lg rounded-xl border border-slate-300 overflow-hidden flex flex-col text-[10px] min-h-[480px]">
+                  {/* Page Top Kop Banner */}
+                  <div className="p-3 text-white" style={{ background: 'linear-gradient(135deg, #0E2340, #16345E)' }}>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-[8px] tracking-wider text-amber-300 font-bold uppercase">
+                          PT AJINOMOTO INDONESIA &bull; MOJOKERTO FACTORY
+                        </p>
+                        <h4 className="text-xs font-bold text-white mt-0.5">LAPORAN MONITORING MULTI-SKILL</h4>
+                        <p className="text-[8px] text-slate-300">
+                          Periode: {blnStr} {thnStr} &bull; Dicetak: {new Date().toLocaleDateString('id-ID')}
                         </p>
                       </div>
+                      <div className="w-8 h-8 rounded-lg bg-white p-1 flex items-center justify-center">
+                        <img
+                          src="https://upload.wikimedia.org/wikipedia/commons/0/01/Ajinomoto_Group_Global_Brand_logo.png"
+                          alt="Logo"
+                          className="max-h-full max-w-full object-contain"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  <div className="h-1 bg-amber-500 w-full"></div>
 
-                      {/* Rekap per Divisi Table */}
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-1.5">
-                          <span className="w-2 h-2 bg-[#B8874B] inline-block"></span>
-                          <h5 className="font-bold text-xs text-slate-900">Rekap per Divisi</h5>
+                  {/* Page Body Preview */}
+                  <div className="p-3.5 space-y-3 flex-1 flex flex-col justify-between">
+                    {activePreviewPage === 'page1' && (
+                      <div className="space-y-2.5 animate-fadeIn">
+                        <p className="font-bold text-[#0E2340] border-b pb-1 text-[11px]">
+                          1. Rekapitulasi Eksekutif &amp; KPI
+                        </p>
+                        <div className="grid grid-cols-4 gap-1.5 text-center">
+                          <div className="p-1.5 rounded bg-slate-50 border">
+                            <span className="text-[7px] text-slate-500 uppercase">Manpower</span>
+                            <p className="font-bold text-slate-800 text-[11px]">{totalManpower}</p>
+                          </div>
+                          <div className="p-1.5 rounded bg-emerald-50 border border-emerald-200">
+                            <span className="text-[7px] text-emerald-600 uppercase">MS</span>
+                            <p className="font-bold text-emerald-600 text-[11px]">{totalMS}</p>
+                          </div>
+                          <div className="p-1.5 rounded bg-rose-50 border border-rose-200">
+                            <span className="text-[7px] text-rose-600 uppercase">US</span>
+                            <p className="font-bold text-rose-600 text-[11px]">{totalUS}</p>
+                          </div>
+                          <div className="p-1.5 rounded bg-blue-50 border border-blue-200">
+                            <span className="text-[7px] text-blue-600 uppercase">% MS</span>
+                            <p className="font-bold text-blue-600 text-[11px]">{pctFormatted}</p>
+                          </div>
                         </div>
-                        <table className="w-full text-[10px] border-collapse">
-                          <thead className="bg-[#0E2340] text-white">
-                            <tr>
-                              <th className="p-1 text-left font-bold pl-2">Divisi</th>
-                              <th className="p-1 text-center font-bold w-12">MS</th>
-                              <th className="p-1 text-center font-bold w-12">US</th>
-                              <th className="p-1 text-center font-bold w-12 pr-2">Total</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {byDivisi.slice(0, 5).map((d, i) => (
-                              <tr key={i} className={i % 2 === 1 ? 'bg-slate-50' : 'bg-white'}>
-                                <td className="p-1 pl-2 text-slate-800">{d.label}</td>
-                                <td className="p-1 text-center">{d.ms}</td>
-                                <td className="p-1 text-center">{d.us}</td>
-                                <td className="p-1 text-center pr-2 font-semibold">{d.ms + d.us}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
 
-                      {/* Rekap per Department Table Preview */}
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-1.5">
-                          <span className="w-2 h-2 bg-[#B8874B] inline-block"></span>
-                          <h5 className="font-bold text-xs text-slate-900">Rekap per Department</h5>
+                        <p className="font-bold text-[#0E2340] pt-1 text-[10px]">2. Ringkasan per Divisi Utama</p>
+                        <div className="border rounded overflow-hidden">
+                          <table className="w-full text-[8.5px] text-left">
+                            <thead className="bg-[#0E2340] text-white">
+                              <tr>
+                                <th className="p-1">Divisi</th>
+                                <th className="p-1 text-center">Total</th>
+                                <th className="p-1 text-center">MS</th>
+                                <th className="p-1 text-center">US</th>
+                                <th className="p-1 text-center">% MS</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {byDivisi.slice(0, 4).map((d) => {
+                                const total = d.ms + d.us;
+                                const pct = total > 0 ? ((d.ms / total) * 100).toFixed(1) + '%' : '0%';
+                                return (
+                                  <tr key={d.label} className="border-t">
+                                    <td className="p-1 font-semibold">{d.label}</td>
+                                    <td className="p-1 text-center">{total}</td>
+                                    <td className="p-1 text-center text-emerald-600 font-bold">{d.ms}</td>
+                                    <td className="p-1 text-center text-rose-600 font-bold">{d.us}</td>
+                                    <td className="p-1 text-center font-bold">{pct}</td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
                         </div>
-                        <table className="w-full text-[10px] border-collapse">
-                          <thead className="bg-[#0E2340] text-white">
-                            <tr>
-                              <th className="p-1 text-left font-bold pl-2">Department</th>
-                              <th className="p-1 text-center font-bold w-12">MS</th>
-                              <th className="p-1 text-center font-bold w-12">US</th>
-                              <th className="p-1 text-center font-bold w-12 pr-2">Total</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {byDepartment.slice(0, 4).map((d, i) => (
-                              <tr key={i} className={i % 2 === 1 ? 'bg-slate-50' : 'bg-white'}>
-                                <td className="p-1 pl-2 text-slate-800">{d.label}</td>
-                                <td className="p-1 text-center">{d.ms}</td>
-                                <td className="p-1 text-center">{d.us}</td>
-                                <td className="p-1 text-center pr-2 font-semibold">{d.ms + d.us}</td>
+                      </div>
+                    )}
+
+                    {activePreviewPage === 'page2' && (
+                      <div className="space-y-2.5 animate-fadeIn">
+                        <p className="font-bold text-[#0E2340] border-b pb-1 text-[11px]">
+                          3. Rekapitulasi per Grade &amp; Kategori Jabatan
+                        </p>
+                        <div className="border rounded overflow-hidden">
+                          <table className="w-full text-[8.5px] text-left">
+                            <thead className="bg-[#0E2340] text-white">
+                              <tr>
+                                <th className="p-1">Kategori Jabatan</th>
+                                <th className="p-1 text-center">Standar</th>
+                                <th className="p-1 text-center">Total</th>
+                                <th className="p-1 text-center">% Pencapaian</th>
                               </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                            </thead>
+                            <tbody>
+                              {byPosition.map((d) => (
+                                <tr key={d.key} className="border-t">
+                                  <td className="p-1 font-semibold">{d.label}</td>
+                                  <td className="p-1 text-center">{d.threshold} Skill</td>
+                                  <td className="p-1 text-center font-bold">{d.manpower}</td>
+                                  <td className="p-1 text-center text-emerald-600 font-bold">{(d.resultPercent * 100).toFixed(1)}%</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
                       </div>
+                    )}
+
+                    {activePreviewPage === 'page3' && (
+                      <div className="space-y-3 animate-fadeIn">
+                        <p className="font-bold text-[#0E2340] border-b pb-1 text-[11px]">
+                          4. Lembar Pengesahan &amp; Tanda Tangan Elektronik
+                        </p>
+                        <div className="p-3 rounded-lg border border-dashed border-slate-300 bg-slate-50 space-y-2">
+                          <p className="text-[8px] text-slate-500">
+                            Dokumen laporan ini diverifikasi dan diterbitkan secara digital oleh Human Resources Development Dept:
+                          </p>
+                          <div className="pt-2 text-center border-t border-slate-200">
+                            <span className="badge-pill bg-emerald-100 text-emerald-800 text-[8px] px-2 py-0.5 font-bold mb-1 inline-block">
+                              E-SIGN VERIFIED
+                            </span>
+                            <p className="font-bold text-[#0E2340] text-[10px]">{signerName}</p>
+                            <p className="text-[8px] text-slate-500">{signerRole}</p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* PDF Preview Footer */}
+                    <div className="pt-2 border-t text-[7.5px] text-slate-400 flex items-center justify-between">
+                      <span>Sistem Multi-Skill Monitoring &bull; PT Ajinomoto Indonesia</span>
+                      <span>
+                        {activePreviewPage === 'page1' && 'Halaman 1 / 3'}
+                        {activePreviewPage === 'page2' && 'Halaman 2 / 3'}
+                        {activePreviewPage === 'page3' && 'Halaman 3 / 3'}
+                      </span>
                     </div>
                   </div>
-                )}
-
-                {/* ================= PAGE 2 PREVIEW ================= */}
-                {activePreviewPage === 'page2' && (
-                  <div className="p-4 space-y-4 animate-fadeIn">
-                    {/* Rekap per Grade */}
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-1.5">
-                        <span className="w-2 h-2 bg-[#B8874B] inline-block"></span>
-                        <h5 className="font-bold text-xs text-slate-900">Rekap per Grade</h5>
-                      </div>
-                      <table className="w-full text-[10px] border-collapse">
-                        <thead className="bg-[#0E2340] text-white">
-                          <tr>
-                            <th className="p-1 text-left font-bold pl-2">Grade</th>
-                            <th className="p-1 text-center font-bold w-12">MS</th>
-                            <th className="p-1 text-center font-bold w-12">US</th>
-                            <th className="p-1 text-center font-bold w-12 pr-2">Total</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {['M5', 'M4', 'M3', 'M2', 'M1', 'ST5', 'ST4', 'ST3'].map((gr, i) => {
-                            const found = byGrade.find((g) => g.label === gr) || { ms: 0, us: 0 };
-                            return (
-                              <tr key={i} className={i % 2 === 1 ? 'bg-slate-50' : 'bg-white'}>
-                                <td className="p-1 pl-2 font-semibold text-slate-800">{gr}</td>
-                                <td className="p-1 text-center">{found.ms}</td>
-                                <td className="p-1 text-center">{found.us}</td>
-                                <td className="p-1 text-center pr-2 font-semibold">{found.ms + found.us}</td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-
-                    {/* Rekap per Job Position */}
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-1.5">
-                        <span className="w-2 h-2 bg-[#B8874B] inline-block"></span>
-                        <h5 className="font-bold text-xs text-slate-900">Rekap per Job Position</h5>
-                      </div>
-                      <table className="w-full text-[10px] border-collapse">
-                        <thead className="bg-[#0E2340] text-white">
-                          <tr>
-                            <th className="p-1 text-left font-bold pl-2">Job Position</th>
-                            <th className="p-1 text-center font-bold">Threshold</th>
-                            <th className="p-1 text-center font-bold">Target (%)</th>
-                            <th className="p-1 text-center font-bold">OK</th>
-                            <th className="p-1 text-center font-bold">Not OK</th>
-                            <th className="p-1 text-center font-bold">Manpower</th>
-                            <th className="p-1 text-center font-bold pr-2">Result (%)</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {byPosition.map((p, i) => (
-                            <tr key={i} className={i % 2 === 1 ? 'bg-slate-50' : 'bg-white'}>
-                              <td className="p-1 pl-2 font-semibold text-slate-800">{p.label}</td>
-                              <td className="p-1 text-center">{p.threshold}</td>
-                              <td className="p-1 text-center">{(p.target * 100).toFixed(1)}</td>
-                              <td className="p-1 text-center">{p.ok}</td>
-                              <td className="p-1 text-center">{p.notOk}</td>
-                              <td className="p-1 text-center">{p.manpower}</td>
-                              <td className="p-1 text-center pr-2 font-bold">{(p.resultPercent * 100).toFixed(1)}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-
-                {/* ================= PAGE 3 PREVIEW (E-SIGN) ================= */}
-                {activePreviewPage === 'page3' && (
-                  <div className="p-6 flex flex-col items-end animate-fadeIn space-y-2">
-                    <div className="text-right text-[11px] text-slate-700 space-y-1">
-                      <p>Mojokerto, {new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
-                      <p>Mengetahui,</p>
-                      <p className="font-extrabold text-xs text-[#0E2340]">HR Management</p>
-                    </div>
-
-                    {/* Dashed E-Sign Box */}
-                    <div className="w-56 p-3 rounded-lg border-2 border-dashed border-[#B8874B] bg-amber-50/20 text-center space-y-1 my-2">
-                      <div className="flex items-center justify-center gap-2">
-                        <span className="w-5 h-5 rounded-full bg-[#B8874B] text-white font-bold text-xs flex items-center justify-center">
-                          ✓
-                        </span>
-                        <span className="font-extrabold text-xs text-[#B8874B] tracking-wider">
-                          E-SIGNED
-                        </span>
-                      </div>
-                      <p className="text-[10px] text-slate-500">Ditandatangani elektronik</p>
-                      <p className="text-[10px] text-slate-600 font-semibold">
-                        {new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}
-                      </p>
-                      <p className="text-[10px] text-slate-500 font-mono">
-                        {new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB
-                      </p>
-                    </div>
-
-                    <div className="text-right text-[11px]">
-                      <p className="font-extrabold text-slate-900">( {signerName} )</p>
-                      <p className="text-slate-500">{signerRole}</p>
-                    </div>
-                  </div>
-                )}
-
-                {/* ================= ROSTER PREVIEW (OPTIONAL) ================= */}
-                {activePreviewPage === 'roster' && (
-                  <div className="p-4 space-y-2 animate-fadeIn">
-                    <p className="font-bold text-xs text-[#0E2340]">
-                      Sample Roster Karyawan ({targetData.slice(0, 6).length} dari {targetData.length} Karyawan):
-                    </p>
-                    <table className="w-full text-[10px] border-collapse">
-                      <thead className="bg-[#0E2340] text-white">
-                        <tr>
-                          <th className="p-1 pl-2 text-left">Emp ID</th>
-                          <th className="p-1 text-left">Nama</th>
-                          <th className="p-1 text-left">Jabatan</th>
-                          <th className="p-1 text-center">Skor</th>
-                          <th className="p-1 text-center">Std</th>
-                          <th className="p-1 text-center pr-2">Status</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {targetData.slice(0, 6).map((e, idx) => (
-                          <tr key={idx} className={idx % 2 === 1 ? 'bg-slate-50' : 'bg-white'}>
-                            <td className="p-1 pl-2 font-mono font-bold">{e.empId}</td>
-                            <td className="p-1 font-semibold">{e.empName}</td>
-                            <td className="p-1">{e.jabatan}</td>
-                            <td className="p-1 text-center font-bold">{e.totalScore}</td>
-                            <td className="p-1 text-center">{e.standard !== null ? `≥ ${e.standard}` : '-'}</td>
-                            <td className="p-1 text-center pr-2 font-bold">
-                              <span className={e.result === 'MS' ? 'text-emerald-600' : 'text-rose-600'}>
-                                {e.result}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-
-              {/* Sheet Page Footer */}
-              <div className="border-t border-slate-200 px-4 py-2 flex items-center justify-between text-[9px] text-slate-400">
-                <span>Sistem Multi-Skill Monitoring – Ajinomoto Mojokerto Factory</span>
-                <span>
-                  {activePreviewPage === 'page1' && 'Halaman 1 / 3'}
-                  {activePreviewPage === 'page2' && 'Halaman 2 / 3'}
-                  {activePreviewPage === 'page3' && 'Halaman 3 / 3'}
-                  {activePreviewPage === 'roster' && 'Halaman Detail Roster'}
-                </span>
-              </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
 
         {/* Modal Footer Controls */}
         <div className="px-5 sm:px-6 py-3.5 border-t border-slate-200 dark:border-slate-800 shrink-0 space-y-3 bg-white dark:bg-slate-900">
-          {/* Optional Email Row */}
+          {/* Email Quick Row Drawer */}
           {isEmailRowOpen && (
             <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 space-y-3 animate-fadeIn">
               <div className="flex items-center justify-between flex-wrap gap-2">
@@ -600,10 +833,10 @@ export const ExportPdfModal: React.FC<ExportPdfModalProps> = ({
                   </span>
                   <div>
                     <p className="text-xs font-bold text-slate-800 dark:text-slate-100">
-                      Pengiriman Laporan Resmi Standar GAS (Google Apps Script)
+                      Pengiriman Laporan Resmi Multi-Skill Monitoring
                     </p>
                     <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                      Email Pengirim: <strong className="text-slate-700 dark:text-slate-200">{currentUser.email || 'mahmudnurdiansyah4@gmail.com'}</strong> ({signerName})
+                      Pengirim: <strong className="text-slate-700 dark:text-slate-200">{currentUser.email || 'mahmudnurdiansyah4@gmail.com'}</strong> ({signerName})
                     </p>
                   </div>
                 </div>
@@ -611,11 +844,23 @@ export const ExportPdfModal: React.FC<ExportPdfModalProps> = ({
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => setShowEmailPreview(!showEmailPreview)}
+                    onClick={() => {
+                      setActivePreviewPage('email');
+                      setEmailViewMode('edit');
+                    }}
                     className="text-[11px] font-semibold text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 cursor-pointer"
                   >
-                    <i className="fa-regular fa-eye text-[10px]"></i>
-                    <span>{showEmailPreview ? 'Sembunyikan Draf' : 'Lihat Redaksional Email'}</span>
+                    <i className="fa-solid fa-pen-to-square text-[10px]"></i>
+                    <span>Edit Redaksional</span>
+                  </button>
+                  <span className="text-slate-300 dark:text-slate-700">&bull;</span>
+                  <button
+                    type="button"
+                    onClick={handleCopyEmailText}
+                    className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 hover:underline flex items-center gap-1 cursor-pointer"
+                  >
+                    <i className={`fa-solid ${copiedEmailText ? 'fa-check text-emerald-600' : 'fa-copy text-[10px]'}`}></i>
+                    <span>{copiedEmailText ? 'Tersalin' : 'Salin Pesan'}</span>
                   </button>
                   <span className="text-slate-300 dark:text-slate-700">&bull;</span>
                   <button
@@ -624,7 +869,7 @@ export const ExportPdfModal: React.FC<ExportPdfModalProps> = ({
                     className="text-[11px] font-semibold text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 flex items-center gap-1 cursor-pointer"
                   >
                     <i className="fa-solid fa-gear text-[10px]"></i>
-                    <span>GAS Webhook</span>
+                    <span>Webhook Server</span>
                   </button>
                 </div>
               </div>
@@ -633,21 +878,21 @@ export const ExportPdfModal: React.FC<ExportPdfModalProps> = ({
               {showWebhookConfig && (
                 <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 space-y-2 text-xs">
                   <label className="block font-bold text-slate-700 dark:text-slate-300">
-                    URL Webhook Google Apps Script (Opsional untuk pengiriman direct serverless):
+                    URL Webhook Email Server (Opsional untuk pengiriman direct serverless):
                   </label>
                   <div className="flex gap-2">
                     <input
                       type="url"
-                      value={gasWebhookUrl}
-                      onChange={(e) => setGasWebhookUrlState(e.target.value)}
-                      placeholder="https://script.google.com/macros/s/.../exec"
+                      value={emailWebhookUrl}
+                      onChange={(e) => setEmailWebhookUrlState(e.target.value)}
+                      placeholder="https://your-email-server.example.com/api/send"
                       className="input-elegant flex-1 px-3 py-1.5 font-mono text-xs"
                     />
                     <button
                       type="button"
                       onClick={() => {
-                        saveGasWebhookUrl(gasWebhookUrl);
-                        setEmailAlert({ type: 'success', message: 'URL Webhook Google Apps Script berhasil disimpan.' });
+                        saveEmailWebhookUrl(emailWebhookUrl);
+                        setEmailAlert({ type: 'success', message: 'URL Webhook Email Server berhasil disimpan.' });
                       }}
                       className="btn-navy px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer"
                     >
@@ -655,30 +900,17 @@ export const ExportPdfModal: React.FC<ExportPdfModalProps> = ({
                     </button>
                   </div>
                   <p className="text-[10.5px] text-slate-400">
-                    Jika webhook kosong, sistem akan langsung membuka client email/Gmail resmi dengan subjek dan format redaksional standar GAS.
+                    Jika webhook kosong, sistem akan langsung membuka client email/Gmail resmi dengan subjek dan teks redaksional yang sudah Anda sesuaikan.
                   </p>
-                </div>
-              )}
-
-              {/* Redaksional Email Preview */}
-              {showEmailPreview && (
-                <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 space-y-2 text-xs">
-                  <div className="flex items-center justify-between text-[11px] font-bold text-slate-500 border-b border-slate-100 dark:border-slate-800 pb-1.5">
-                    <span>Subjek: {emailDraftPayload.subject}</span>
-                    <span className="text-emerald-600 font-mono">Format GAS Standar</span>
-                  </div>
-                  <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-slate-950 font-mono text-[11px] text-slate-700 dark:text-slate-300 whitespace-pre-wrap max-h-40 overflow-y-auto leading-relaxed border border-slate-200 dark:border-slate-800">
-                    {emailDraftPayload.plainTextBody}
-                  </div>
                 </div>
               )}
 
               <div className="flex gap-2 items-center flex-wrap">
                 <input
                   type="email"
-                  value={emailInput}
-                  onChange={(e) => setEmailInput(e.target.value)}
-                  placeholder="Masukkan alamat email pimpinan/tujuan (contoh: manager.hr@ajinomoto.co.id)..."
+                  value={emailContent.toEmail}
+                  onChange={(e) => setEmailContent({ ...emailContent, toEmail: e.target.value })}
+                  placeholder="Masukkan alamat email pimpinan/tujuan (contoh: pimpinan@ajinomoto.co.id)..."
                   className="input-elegant flex-1 min-w-[260px] px-3 py-2 outline-none text-xs sm:text-sm text-slate-800 dark:text-slate-100"
                 />
                 <button
@@ -750,7 +982,7 @@ export const ExportPdfModal: React.FC<ExportPdfModalProps> = ({
                 ) : (
                   <>
                     <i className="fa-solid fa-file-arrow-down text-sm"></i>
-                    <span>Download Laporan PDF (GAS)</span>
+                    <span>Download Laporan PDF</span>
                   </>
                 )}
               </button>
