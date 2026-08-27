@@ -23,7 +23,6 @@ import {
 
 export { calculateEmployeeScore };
 import { jsPDF } from 'jspdf';
-import 'jspdf-autotable';
 
 const STORAGE_KEYS = {
   EMPLOYEES: 'msm_employees_v2',

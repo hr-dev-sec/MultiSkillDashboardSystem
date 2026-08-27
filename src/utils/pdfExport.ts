@@ -1,5 +1,5 @@
 import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+import autoTable from 'jspdf-autotable';
 import { Employee, AppFiltersState, UserSession } from '../types';
 import { BULAN_LABELS } from '../data/initialData';
 import { computeDashboardStats } from './storage';
@@ -246,7 +246,7 @@ export function generateMultiSkillReportPdf({
       return [d.label, String(d.ms), String(d.us), String(tot)];
     });
 
-    (doc as any).autoTable({
+    autoTable(doc, {
       startY: y,
       head: [['Divisi', 'MS', 'US', 'Total']],
       body: divisiRows,
@@ -275,7 +275,7 @@ export function generateMultiSkillReportPdf({
       margin: { left: marginX, right: marginX }
     });
 
-    y = (doc as any).lastAutoTable.finalY + 6.5;
+    y = ((doc as any).lastAutoTable?.finalY ?? y) + 6.5;
   };
 
   // =========================================================================
@@ -289,7 +289,7 @@ export function generateMultiSkillReportPdf({
       return [d.label, String(d.ms), String(d.us), String(tot)];
     });
 
-    (doc as any).autoTable({
+    autoTable(doc, {
       startY: y,
       head: [['Department', 'MS', 'US', 'Total']],
       body: deptRows,
@@ -319,7 +319,7 @@ export function generateMultiSkillReportPdf({
       margin: { left: marginX, right: marginX, top: 14, bottom: 16 }
     });
 
-    y = (doc as any).lastAutoTable.finalY + 6.5;
+    y = ((doc as any).lastAutoTable?.finalY ?? y) + 6.5;
   };
 
   // =========================================================================
@@ -346,7 +346,7 @@ export function generateMultiSkillReportPdf({
       }
     });
 
-    (doc as any).autoTable({
+    autoTable(doc, {
       startY: y,
       head: [['Grade', 'MS', 'US', 'Total']],
       body: gradeRows,
@@ -375,7 +375,7 @@ export function generateMultiSkillReportPdf({
       margin: { left: marginX, right: marginX, top: 14, bottom: 16 }
     });
 
-    y = (doc as any).lastAutoTable.finalY + 6.5;
+    y = ((doc as any).lastAutoTable?.finalY ?? y) + 6.5;
   };
 
   // =========================================================================
@@ -396,7 +396,7 @@ export function generateMultiSkillReportPdf({
       ];
     });
 
-    (doc as any).autoTable({
+    autoTable(doc, {
       startY: y,
       head: [['Job Position', 'Threshold', 'Target (%)', 'OK', 'Not OK', 'Manpower', 'Result (%)']],
       body: posRows,
@@ -428,7 +428,7 @@ export function generateMultiSkillReportPdf({
       margin: { left: marginX, right: marginX, top: 14, bottom: 16 }
     });
 
-    y = (doc as any).lastAutoTable.finalY + 8;
+    y = ((doc as any).lastAutoTable?.finalY ?? y) + 8;
   };
 
   // =========================================================================
@@ -469,10 +469,14 @@ export function generateMultiSkillReportPdf({
     // Dashed Gold Border Box
     doc.setDrawColor(...COLOR_GOLD);
     doc.setLineWidth(0.35);
-    (doc as any).setLineDashPattern([1.5, 1.2], 0);
+    if (typeof (doc as any).setLineDashPattern === 'function') {
+      (doc as any).setLineDashPattern([1.5, 1.2], 0);
+    }
     doc.setFillColor(255, 255, 255);
     doc.roundedRect(signX, y, boxW, boxH, 2, 2, 'FD');
-    (doc as any).setLineDashPattern([], 0); // reset line dash
+    if (typeof (doc as any).setLineDashPattern === 'function') {
+      (doc as any).setLineDashPattern([], 0); // reset line dash
+    }
 
     // Inside E-Sign Box
     const iconX = signX + 7.5;
@@ -543,7 +547,7 @@ export function generateMultiSkillReportPdf({
         ];
       });
 
-      (doc as any).autoTable({
+      autoTable(doc, {
         startY: y,
         head: [['No', 'Emp ID', 'Nama Karyawan', 'Divisi', 'Dept', 'Grade', 'Jabatan', 'Periode', 'Skor', 'Std', 'Status']],
         body: rosterRows,
@@ -579,7 +583,7 @@ export function generateMultiSkillReportPdf({
         margin: { left: marginX, right: marginX }
       });
 
-      y = (doc as any).lastAutoTable.finalY + 8;
+      y = ((doc as any).lastAutoTable?.finalY ?? y) + 8;
     }
   };
 
