@@ -1,0 +1,707 @@
+import {
+  Employee,
+  SkillMeta,
+  UserAccount,
+  UserSession,
+  PeriodsData,
+  ConfigMeta,
+  DashboardStats,
+  PositionStat,
+  GroupStat,
+  AppFiltersState,
+  JobPositionCategory
+} from '../types';
+import {
+  INITIAL_USERS,
+  INITIAL_SKILL_META,
+  CONFIG_META,
+  GRADE_ORDER,
+  BULAN_LABELS,
+  generateInitialEmployees,
+  calculateEmployeeScore
+} from '../data/initialData';
+
+export { calculateEmployeeScore };
+import { jsPDF } from 'jspdf';
+import 'jspdf-autotable';
+
+const STORAGE_KEYS = {
+  EMPLOYEES: 'msm_employees_v2',
+  USERS: 'msm_users_v2',
+  SESSION: 'msm_session_v2',
+  DARK_MODE: 'msm.darkMode'
+};
+
+export const AJINOMOTO_LOGO_URL = 'https://upload.wikimedia.org/wikipedia/commons/0/01/Ajinomoto_Group_Global_Brand_logo.png';
+
+// Storage helpers
+export function getStoredEmployees(): Employee[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.EMPLOYEES);
+    let employees: Employee[];
+    if (!raw) {
+      employees = generateInitialEmployees();
+      saveStoredEmployees(employees);
+      return employees;
+    }
+    employees = JSON.parse(raw);
+    
+    // Ensure all loaded employees have up-to-date score and result calculations
+    let needsUpdate = false;
+    const sanitized = employees.map((emp) => {
+      const skills = emp.skills || {};
+      const calc = calculateEmployeeScore(skills, emp.jabatan, emp.standard);
+      if (
+        emp.totalScore !== calc.totalScore ||
+        emp.result !== calc.result ||
+        emp.standard !== calc.standard ||
+        emp.gap !== calc.gap ||
+        emp.jobCategory !== calc.jobCategory
+      ) {
+        needsUpdate = true;
+        return {
+          ...emp,
+          jobCategory: calc.jobCategory,
+          totalScore: calc.totalScore,
+          standard: calc.standard,
+          result: calc.result,
+          gap: calc.gap
+        };
+      }
+      return emp;
+    });
+
+    if (needsUpdate) {
+      saveStoredEmployees(sanitized);
+      return sanitized;
+    }
+
+    return employees;
+  } catch (err) {
+    console.error('Error loading employees:', err);
+    return generateInitialEmployees();
+  }
+}
+
+export function saveStoredEmployees(employees: Employee[]): void {
+  try {
+    localStorage.setItem(STORAGE_KEYS.EMPLOYEES, JSON.stringify(employees));
+  } catch (err) {
+    console.error('Error saving employees:', err);
+  }
+}
+
+export function getStoredUsers(): UserAccount[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.USERS);
+    if (!raw) {
+      saveStoredUsers(INITIAL_USERS);
+      return INITIAL_USERS;
+    }
+    const parsed: UserAccount[] = JSON.parse(raw);
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      saveStoredUsers(INITIAL_USERS);
+      return INITIAL_USERS;
+    }
+    return parsed;
+  } catch (err) {
+    console.error('Error loading users:', err);
+    return INITIAL_USERS;
+  }
+}
+
+export function saveStoredUsers(users: UserAccount[]): void {
+  try {
+    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+  } catch (err) {
+    console.error('Error saving users:', err);
+  }
+}
+
+export function getStoredSession(): UserSession | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.SESSION);
+    if (!raw) return null;
+    const session: UserSession = JSON.parse(raw);
+    return session;
+  } catch (err) {
+    return null;
+  }
+}
+
+export const getSession = getStoredSession;
+
+export function saveStoredSession(session: UserSession | null): void {
+  try {
+    if (session) {
+      localStorage.setItem(STORAGE_KEYS.SESSION, JSON.stringify(session));
+    } else {
+      localStorage.removeItem(STORAGE_KEYS.SESSION);
+    }
+  } catch (err) {
+    console.error('Error saving session:', err);
+  }
+}
+
+export const saveSession = saveStoredSession;
+
+export function clearSession(): void {
+  try {
+    localStorage.removeItem(STORAGE_KEYS.SESSION);
+  } catch (err) {
+    console.error('Error clearing session:', err);
+  }
+}
+
+export function checkLogin(username: string, password: string): { success: boolean; message?: string; session?: UserSession } {
+  const users = getStoredUsers();
+  const user = users.find((u) => u.username.trim().toLowerCase() === username.trim().toLowerCase() && u.password === password);
+  
+  if (!user) {
+    return { success: false, message: 'Username atau password salah. Silakan coba lagi.' };
+  }
+
+  const session: UserSession = {
+    username: user.username,
+    name: user.name,
+    role: user.role,
+    department: user.department,
+    email: user.email || 'mahmud.nurdiansyah@ajinomoto.co.id',
+    phone: user.phone || '0812-3456-7890',
+    nik: user.nik || 'AJI-HRD-0104',
+    avatarUrl: user.avatarUrl || '',
+    bio: user.bio || 'Administrator Multi-Skill Monitoring & Pengembangan Kompetensi Karyawan PT Ajinomoto Indonesia Mojokerto Factory.',
+    token: 'tok_' + Math.random().toString(36).substring(2) + Date.now().toString(36)
+  };
+
+  saveStoredSession(session);
+  return { success: true, session };
+}
+
+export function changePassword(username: string, oldPw: string, newPw: string): { success: boolean; message: string } {
+  const users = getStoredUsers();
+  const idx = users.findIndex((u) => u.username.trim().toLowerCase() === username.trim().toLowerCase());
+  
+  if (idx === -1) {
+    return { success: false, message: 'Akun pengguna tidak ditemukan.' };
+  }
+  if (users[idx].password !== oldPw) {
+    return { success: false, message: 'Password lama tidak sesuai.' };
+  }
+  if (!newPw || newPw.length < 6) {
+    return { success: false, message: 'Password baru minimal 6 karakter.' };
+  }
+
+  users[idx].password = newPw;
+  saveStoredUsers(users);
+  return { success: true, message: 'Password berhasil diperbarui.' };
+}
+
+export function updateUserProfile(
+  oldUsername: string,
+  updatedData: Partial<UserAccount>
+): { success: boolean; message: string; session?: UserSession } {
+  const users = getStoredUsers();
+  const idx = users.findIndex((u) => u.username.trim().toLowerCase() === oldUsername.trim().toLowerCase());
+
+  if (idx === -1) {
+    return { success: false, message: 'Akun admin tidak ditemukan di database sistem.' };
+  }
+
+  // If changing username, ensure uniqueness
+  if (updatedData.username && updatedData.username.trim().toLowerCase() !== oldUsername.trim().toLowerCase()) {
+    const isTaken = users.some(
+      (u, i) => i !== idx && u.username.trim().toLowerCase() === updatedData.username!.trim().toLowerCase()
+    );
+    if (isTaken) {
+      return { success: false, message: `Username "${updatedData.username}" sudah digunakan oleh akun lain.` };
+    }
+  }
+
+  const currentUserData = users[idx];
+  const mergedUser: UserAccount = {
+    ...currentUserData,
+    ...updatedData,
+    username: updatedData.username?.trim() || currentUserData.username,
+    name: updatedData.name?.trim() || currentUserData.name,
+    role: updatedData.role?.trim() || currentUserData.role,
+    department: updatedData.department?.trim() || currentUserData.department,
+    email: updatedData.email?.trim() || currentUserData.email,
+    phone: updatedData.phone?.trim() || currentUserData.phone,
+    nik: updatedData.nik?.trim() || currentUserData.nik,
+    avatarUrl: updatedData.avatarUrl !== undefined ? updatedData.avatarUrl : currentUserData.avatarUrl,
+    bio: updatedData.bio !== undefined ? updatedData.bio : currentUserData.bio
+  };
+
+  users[idx] = mergedUser;
+  saveStoredUsers(users);
+
+  // Update active session
+  const currentSession = getStoredSession();
+  const updatedSession: UserSession = {
+    ...currentSession,
+    username: mergedUser.username,
+    name: mergedUser.name,
+    role: mergedUser.role,
+    department: mergedUser.department,
+    email: mergedUser.email,
+    phone: mergedUser.phone,
+    nik: mergedUser.nik,
+    avatarUrl: mergedUser.avatarUrl,
+    bio: mergedUser.bio,
+    token: currentSession?.token || 'tok_admin_' + Date.now()
+  };
+
+  saveStoredSession(updatedSession);
+  return { success: true, message: 'Profil admin berhasil diperbarui.', session: updatedSession };
+}
+
+// Compute dynamic periods data from employee list
+export function getPeriods(employees: Employee[]): PeriodsData {
+  const tahunSet: Record<string, boolean> = {};
+  const bulanByTahun: Record<string, Record<string, boolean>> = {};
+
+  employees.forEach((e) => {
+    if (!e.tahun) return;
+    const tKey = String(e.tahun);
+    tahunSet[tKey] = true;
+    if (!bulanByTahun[tKey]) bulanByTahun[tKey] = {};
+    if (e.bulan) bulanByTahun[tKey][String(e.bulan)] = true;
+  });
+
+  const tahunList = Object.keys(tahunSet)
+    .map(Number)
+    .sort((a, b) => b - a);
+
+  const bulanByTahunList: Record<string, number[]> = {};
+  Object.keys(bulanByTahun).forEach((k) => {
+    bulanByTahunList[k] = Object.keys(bulanByTahun[k])
+      .map(Number)
+      .sort((a, b) => a - b);
+  });
+
+  const now = new Date();
+  return {
+    tahunList: tahunList.length ? tahunList : [now.getFullYear()],
+    bulanByTahun: bulanByTahunList,
+    currentTahun: now.getFullYear(),
+    currentBulan: now.getMonth() + 1,
+    bulanLabels: BULAN_LABELS
+  };
+}
+
+export const extractPeriods = getPeriods;
+
+/**
+ * Mendapatkan filter periode default:
+ * 1. Tahun dan bulan saat ini jika datanya tersedia di database karyawan.
+ * 2. Jika data tahun & bulan saat ini tidak ada, tampilkan periode data terakhir dalam waktu terdekat yang tersedia.
+ */
+export function getDefaultFilterPeriod(employees: Employee[]): { tahun: string[]; bulan: string[] } {
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth() + 1;
+
+  if (!employees || employees.length === 0) {
+    return {
+      tahun: [String(currentYear)],
+      bulan: [String(currentMonth)]
+    };
+  }
+
+  // 1. Cek apakah ada data di tahun & bulan saat ini
+  const hasCurrent = employees.some(
+    (e) => Number(e.tahun) === currentYear && Number(e.bulan) === currentMonth
+  );
+
+  if (hasCurrent) {
+    return {
+      tahun: [String(currentYear)],
+      bulan: [String(currentMonth)]
+    };
+  }
+
+  // 2. Kumpulkan seluruh periode (tahun, bulan) unik yang valid dari dataset
+  const periodMap = new Map<string, { tahun: number; bulan: number; count: number; weight: number }>();
+
+  employees.forEach((e) => {
+    const t = Number(e.tahun);
+    const b = Number(e.bulan);
+    if (!isNaN(t) && t > 0 && !isNaN(b) && b >= 1 && b <= 12) {
+      const key = `${t}-${b}`;
+      const existing = periodMap.get(key);
+      if (existing) {
+        existing.count++;
+      } else {
+        periodMap.set(key, { tahun: t, bulan: b, count: 1, weight: t * 12 + b });
+      }
+    }
+  });
+
+  const periodList = Array.from(periodMap.values());
+
+  if (periodList.length === 0) {
+    return {
+      tahun: [String(currentYear)],
+      bulan: [String(currentMonth)]
+    };
+  }
+
+  // Urutkan menurun berdasarkan bobot kronologis waktu (terbaru ke terlama)
+  periodList.sort((a, b) => b.weight - a.weight);
+
+  const currentWeight = currentYear * 12 + currentMonth;
+
+  // Utamakan data terakhir yang <= waktu sekarang (waktu terdekat yang sudah ada)
+  const pastOrPresent = periodList.filter((p) => p.weight <= currentWeight);
+  const bestPeriod = pastOrPresent.length > 0 ? pastOrPresent[0] : periodList[0];
+
+  return {
+    tahun: [String(bestPeriod.tahun)],
+    bulan: [String(bestPeriod.bulan)]
+  };
+}
+
+export function getFilteredEmployees(employees: Employee[], filters: AppFiltersState): Employee[] {
+  return employees.filter((e) => {
+    if (filters.tahun.length && !filters.tahun.includes(String(e.tahun || ''))) return false;
+    if (filters.bulan.length && !filters.bulan.includes(String(e.bulan || ''))) return false;
+    if (filters.divisi.length && !filters.divisi.includes(e.divisi)) return false;
+    if (filters.department.length && !filters.department.includes(e.department)) return false;
+    if (filters.jabatan.length && !filters.jabatan.includes(e.jabatan)) return false;
+    return true;
+  });
+}
+
+export const filterEmployees = getFilteredEmployees;
+
+export function sortByGradeOrder<T extends { label?: string; grade?: string } | string>(list: T[]): T[] {
+  function orderIndex(v: any) {
+    const str = typeof v === 'string' ? v : (v.label || v.grade || '');
+    const idx = GRADE_ORDER.indexOf(str.trim().toUpperCase());
+    return idx === -1 ? GRADE_ORDER.length : idx;
+  }
+  return [...list].sort((a, b) => {
+    const ia = orderIndex(a);
+    const ib = orderIndex(b);
+    if (ia !== ib) return ia - ib;
+    const sa = typeof a === 'string' ? a : (a.label || a.grade || '');
+    const sb = typeof b === 'string' ? b : (b.label || b.grade || '');
+    return sa.localeCompare(sb);
+  });
+}
+
+export function computeDashboardStats(employees: Employee[], configMeta: ConfigMeta = CONFIG_META): DashboardStats {
+  const { jobPositionMeta, targetPercent } = configMeta;
+
+  let totalMS = 0;
+  let totalUS = 0;
+
+  const byPosition: Record<JobPositionCategory, { ok: number; notOk: number }> = {
+    LL_FOREMAN: { ok: 0, notOk: 0 },
+    ASM_SM: { ok: 0, notOk: 0 },
+    DEPT_MGR_UP: { ok: 0, notOk: 0 }
+  };
+
+  const divisiMap: Record<string, { label: string; ms: number; us: number }> = {};
+  const deptMap: Record<string, { label: string; ms: number; us: number }> = {};
+  const gradeMap: Record<string, { label: string; ms: number; us: number }> = {};
+  const genderMap = { L: 0, P: 0, Lainnya: 0 };
+
+  employees.forEach((emp) => {
+    if (emp.result === 'MS') totalMS++;
+    else if (emp.result === 'US') totalUS++;
+
+    if (emp.jobCategory && emp.result) {
+      if (emp.result === 'MS') byPosition[emp.jobCategory].ok++;
+      else byPosition[emp.jobCategory].notOk++;
+    }
+
+    const divisiKey = emp.divisi || '(Tanpa Divisi)';
+    if (!divisiMap[divisiKey]) divisiMap[divisiKey] = { label: divisiKey, ms: 0, us: 0 };
+    if (emp.result === 'MS') divisiMap[divisiKey].ms++;
+    else if (emp.result === 'US') divisiMap[divisiKey].us++;
+
+    const deptKey = emp.department || '(Tanpa Department)';
+    if (!deptMap[deptKey]) deptMap[deptKey] = { label: deptKey, ms: 0, us: 0 };
+    if (emp.result === 'MS') deptMap[deptKey].ms++;
+    else if (emp.result === 'US') deptMap[deptKey].us++;
+
+    const gradeKey = emp.grade || '(Tanpa Grade)';
+    if (!gradeMap[gradeKey]) gradeMap[gradeKey] = { label: gradeKey, ms: 0, us: 0 };
+    if (emp.result === 'MS') gradeMap[gradeKey].ms++;
+    else if (emp.result === 'US') gradeMap[gradeKey].us++;
+
+    const g = (emp.gender || '').toString().trim().toUpperCase();
+    if (g === 'L') genderMap.L++;
+    else if (g === 'P') genderMap.P++;
+    else genderMap.Lainnya++;
+  });
+
+  const totalManpower = totalMS + totalUS;
+
+  const positionKeys: JobPositionCategory[] = ['DEPT_MGR_UP', 'ASM_SM', 'LL_FOREMAN'];
+  const byPositionArray: PositionStat[] = positionKeys.map((key) => {
+    const meta = jobPositionMeta[key];
+    const counts = byPosition[key];
+    const manpower = counts.ok + counts.notOk;
+    return {
+      key,
+      label: meta.label,
+      threshold: meta.threshold,
+      target: targetPercent[key],
+      manpower,
+      ok: counts.ok,
+      notOk: counts.notOk,
+      resultPercent: manpower > 0 ? counts.ok / manpower : 0
+    };
+  });
+
+  const sortDesc = (a: GroupStat, b: GroupStat) => (b.ms + b.us) - (a.ms + a.us);
+  const byDivisi = Object.values(divisiMap).sort(sortDesc);
+  const byDepartment = Object.values(deptMap).sort(sortDesc);
+  const byGrade = sortByGradeOrder(Object.values(gradeMap));
+
+  return {
+    totalManpower,
+    totalMS,
+    totalUS,
+    percentMS: totalManpower > 0 ? totalMS / totalManpower : 0,
+    byPosition: byPositionArray,
+    byDivisi,
+    byDepartment,
+    byGrade,
+    genderMap,
+    notes: [
+      'Data dihitung realtime dari sheet "Baseline Data Multi Skill" sesuai filter aktif.',
+      'Gunakan filter Tahun/Bulan/Divisi/Department/Jabatan di atas untuk mempersempit tampilan matriks.',
+      'Standar threshold: Dept Mgr Up (≥4 seksi), ASM-SM (≥3 seksi), LL-Foreman (≥2 seksi).'
+    ],
+    lastUpdated: new Date().toISOString()
+  };
+}
+
+export function updateEmployeeSkillMatrix(
+  employees: Employee[],
+  rowIndex: number,
+  skillCode: string,
+  checked: boolean
+): { updatedEmployees: Employee[]; updatedEmployee: Employee } {
+  const index = employees.findIndex((e) => e.rowIndex === rowIndex);
+  if (index === -1) {
+    throw new Error('Baris data karyawan tidak ditemukan.');
+  }
+
+  const emp = { ...employees[index] };
+  const updatedSkills = { ...emp.skills, [skillCode]: checked };
+  const calc = calculateEmployeeScore(updatedSkills, emp.jabatan, emp.standard);
+
+  const updatedEmployee: Employee = {
+    ...emp,
+    skills: updatedSkills,
+    totalScore: calc.totalScore,
+    standard: calc.standard,
+    result: calc.result,
+    gap: calc.gap,
+    jobCategory: calc.jobCategory
+  };
+
+  const updatedEmployees = [...employees];
+  updatedEmployees[index] = updatedEmployee;
+  saveStoredEmployees(updatedEmployees);
+
+  return { updatedEmployees, updatedEmployee };
+}
+
+export function addNewEmployee(
+  employees: Employee[],
+  payload: {
+    empId: string;
+    empName: string;
+    divisi?: string;
+    department?: string;
+    section?: string;
+    grade?: string;
+    jobGrade?: string;
+    jabatan?: string;
+    gender?: string;
+    pic?: string;
+    tahun: number;
+    bulan: number;
+  }
+): { success: boolean; message: string; employees: Employee[] } {
+  const exists = employees.some(
+    (e) =>
+      e.empId.trim().toLowerCase() === payload.empId.trim().toLowerCase() &&
+      Number(e.tahun) === Number(payload.tahun) &&
+      Number(e.bulan) === Number(payload.bulan)
+  );
+
+  if (exists) {
+    return { success: false, message: 'Karyawan dengan Emp. ID tersebut sudah ada pada periode ini.', employees };
+  }
+
+  const maxRowIndex = employees.reduce((max, e) => Math.max(max, e.rowIndex || 0), 6);
+  const maxNo = employees.reduce((max, e) => Math.max(max, e.no || 0), 0);
+
+  const emptySkills: Record<string, boolean> = {};
+  INITIAL_SKILL_META.forEach((sm) => {
+    emptySkills[sm.code] = false;
+  });
+
+  const calc = calculateEmployeeScore(emptySkills, payload.jabatan || '');
+
+  const newEmployee: Employee = {
+    rowIndex: maxRowIndex + 1,
+    no: maxNo + 1,
+    empId: payload.empId.trim(),
+    empName: payload.empName.trim(),
+    divisi: payload.divisi?.trim() || '',
+    department: payload.department?.trim() || '',
+    section: payload.section?.trim() || '',
+    grade: payload.grade?.trim() || '',
+    jobGrade: payload.jobGrade?.trim() || '',
+    jabatan: payload.jabatan?.trim() || '',
+    gender: payload.gender || 'L',
+    pic: payload.pic?.trim() || '',
+    tahun: Number(payload.tahun),
+    bulan: Number(payload.bulan),
+    jobCategory: calc.jobCategory,
+    totalScore: calc.totalScore,
+    standard: calc.standard,
+    result: calc.result,
+    gap: calc.gap,
+    skills: emptySkills
+  };
+
+  const updatedEmployees = [...employees, newEmployee];
+  saveStoredEmployees(updatedEmployees);
+  return { success: true, message: 'Karyawan baru berhasil ditambahkan.', employees: updatedEmployees };
+}
+
+export function deleteEmployee(employees: Employee[], rowIndex: number): { success: boolean; message: string; employees: Employee[] } {
+  const updatedEmployees = employees.filter((e) => e.rowIndex !== rowIndex);
+  saveStoredEmployees(updatedEmployees);
+  return { success: true, message: 'Data karyawan berhasil dihapus.', employees: updatedEmployees };
+}
+
+export function duplicatePeriod(
+  employees: Employee[],
+  sourceTahun: number,
+  sourceBulan: number,
+  targetTahun: number,
+  targetBulan: number
+): { success: boolean; message: string; count: number; employees: Employee[] } {
+  const sourceRows = employees.filter(
+    (e) => Number(e.tahun) === Number(sourceTahun) && Number(e.bulan) === Number(sourceBulan)
+  );
+
+  if (!sourceRows.length) {
+    return { success: false, message: 'Tidak ditemukan data pada periode sumber tersebut.', count: 0, employees };
+  }
+
+  let nextRowIndex = employees.reduce((max, e) => Math.max(max, e.rowIndex || 0), 6) + 1;
+  let nextNo = employees.reduce((max, e) => Math.max(max, e.no || 0), 0) + 1;
+
+  const duplicatedRows: Employee[] = sourceRows.map((src) => {
+    return {
+      ...src,
+      rowIndex: nextRowIndex++,
+      no: nextNo++,
+      tahun: Number(targetTahun),
+      bulan: Number(targetBulan),
+      skills: { ...src.skills } // deep clone skills
+    };
+  });
+
+  const updatedEmployees = [...employees, ...duplicatedRows];
+  saveStoredEmployees(updatedEmployees);
+
+  return {
+    success: true,
+    count: duplicatedRows.length,
+    message: `${duplicatedRows.length} data karyawan berhasil diduplikasi ke periode ${BULAN_LABELS[targetBulan - 1]} ${targetTahun}. Silakan sesuaikan checklist skill dan mutasi.`,
+    employees: updatedEmployees
+  };
+}
+
+// CSV Export for Database Data (All records + 90+ skill matrix columns)
+export function exportDatabaseCsv(employees: Employee[], skillMeta: SkillMeta[] = INITIAL_SKILL_META): void {
+  function csvEscape(val: any): string {
+    const s = val === null || val === undefined ? '' : String(val);
+    if (/[",\n\r]/.test(s)) {
+      return '"' + s.replace(/"/g, '""') + '"';
+    }
+    return s;
+  }
+
+  const header = [
+    'No', 'Emp ID', 'Emp Name', 'Divisi', 'Department', 'Section', 'Grade', 'Job Grade',
+    'Jabatan', 'Gender', 'Tanggal Pensiun', 'PIC', 'Tahun', 'Bulan'
+  ].concat(skillMeta.map((s) => s.code)).concat(['Total Score', 'Standard', 'Result', 'GAP']);
+
+  const rows: string[][] = [header];
+
+  employees.forEach((e) => {
+    const row = [
+      String(e.no),
+      e.empId,
+      e.empName,
+      e.divisi,
+      e.department,
+      e.section,
+      e.grade,
+      e.jobGrade,
+      e.jabatan,
+      e.gender,
+      e.tanggalPensiun || '',
+      e.pic || '',
+      String(e.tahun),
+      String(e.bulan)
+    ];
+
+    skillMeta.forEach((s) => {
+      row.push(e.skills[s.code] ? '1' : '0');
+    });
+
+    row.push(String(e.totalScore), String(e.standard ?? ''), e.result || '', String(e.gap ?? ''));
+    rows.push(row);
+  });
+
+  const csvContent = rows.map((r) => r.map(csvEscape).join(',')).join('\r\n');
+  const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `Database_MultiSkill_${Date.now()}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+import { generateMultiSkillReportPdf } from './pdfExport';
+
+// PDF Generator matching the elegant Ajinomoto Mojokerto Factory template (GAS format)
+export function buildReportPdfDoc(
+  filteredEmployees: Employee[],
+  filters: AppFiltersState,
+  userInfo: { name: string; role: string }
+): jsPDF {
+  const result = generateMultiSkillReportPdf({
+    scope: 'filtered',
+    filteredEmployees: filteredEmployees,
+    allEmployees: filteredEmployees,
+    filters: filters,
+    currentUser: {
+      username: 'hr_admin',
+      name: userInfo.name || 'Mahmud Nurdiansyah',
+      role: userInfo.role || 'HR Development Specialist',
+      department: 'Human Resources Development'
+    },
+    reportType: 'comprehensive'
+  });
+
+  return result.doc;
+}
+

@@ -1,0 +1,1348 @@
+import { Employee, SkillMeta } from '../types';
+import { INITIAL_SKILL_META, calculateEmployeeScore, BULAN_LABELS } from '../data/initialData';
+import { saveStoredEmployees } from './storage';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
+
+export interface SupabaseConfig {
+  url: string;
+  anonKey: string;
+  tableName: string;
+}
+
+export interface ImportPreview {
+  totalRows: number;
+  newRows: number;
+  updateRows: number;
+  sampleRows: Partial<Employee>[];
+  detectedColumns: string[];
+  periods: string[];
+  parsedEmployees: Employee[];
+}
+
+export interface SyncResponse<T = any> {
+  success: boolean;
+  message: string;
+  data?: T;
+  count?: number;
+  preview?: ImportPreview;
+  errors?: string[];
+  syncedBatches?: number;
+  totalBatches?: number;
+}
+
+export interface SchemaFieldDoc {
+  column: string;
+  type: string;
+  description: string;
+  sheetSource: string;
+  sample: string;
+}
+
+const SUPABASE_CONFIG_KEY = 'msm_supabase_config_v1';
+
+// Default Supabase Config
+export function getSupabaseConfig(): SupabaseConfig {
+  try {
+    const raw = localStorage.getItem(SUPABASE_CONFIG_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch (_) {}
+  return {
+    url: '',
+    anonKey: '',
+    tableName: 'employees_multi_skill'
+  };
+}
+
+export function saveSupabaseConfig(config: SupabaseConfig): void {
+  try {
+    localStorage.setItem(SUPABASE_CONFIG_KEY, JSON.stringify(config));
+  } catch (err) {
+    console.error('Error saving Supabase config:', err);
+  }
+}
+
+// Create or get Supabase Client
+let cachedClient: SupabaseClient | null = null;
+let cachedClientUrl = '';
+let cachedClientKey = '';
+
+export function getSupabaseClient(config: SupabaseConfig): SupabaseClient | null {
+  if (!config.url || !config.anonKey) return null;
+  const cleanUrl = config.url.trim().replace(/\/+$/, '');
+  const cleanKey = config.anonKey.trim();
+
+  if (cachedClient && cachedClientUrl === cleanUrl && cachedClientKey === cleanKey) {
+    return cachedClient;
+  }
+
+  try {
+    cachedClient = createClient(cleanUrl, cleanKey, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false
+      }
+    });
+    cachedClientUrl = cleanUrl;
+    cachedClientKey = cleanKey;
+    return cachedClient;
+  } catch (err) {
+    console.error('Failed to create Supabase client:', err);
+    return null;
+  }
+}
+
+export const DEFAULT_GOOGLE_SHEET_URL = 'https://docs.google.com/spreadsheets/d/1FJTXnDq4bVTFfxcpCyML5GGh4qeiZjMfV0OmzGY56yI/edit?gid=2036340139#gid=2036340139';
+const GOOGLE_SHEET_URL_KEY = 'msm_googlesheet_url_v1';
+
+export function getSavedGoogleSheetUrl(): string {
+  try {
+    const saved = localStorage.getItem(GOOGLE_SHEET_URL_KEY);
+    if (saved && saved.trim()) return saved.trim();
+  } catch (_) {}
+  return DEFAULT_GOOGLE_SHEET_URL;
+}
+
+export function saveGoogleSheetUrl(url: string): void {
+  try {
+    localStorage.setItem(GOOGLE_SHEET_URL_KEY, url.trim());
+  } catch (err) {
+    console.error('Error saving Google Sheet URL:', err);
+  }
+}
+
+// -------------------------------------------------------------
+// Google Sheet Helpers
+// -------------------------------------------------------------
+export function extractGoogleSheetId(inputUrl: string): { sheetId: string; gid: string } | null {
+  if (!inputUrl || !inputUrl.trim()) return null;
+  const url = inputUrl.trim();
+
+  // Match /spreadsheets/d/{sheetId} with optional gid
+  const matchId = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  if (!matchId) return null;
+
+  const sheetId = matchId[1];
+  const gidMatch = url.match(/[?&#]gid=([0-9]+)/);
+  const gid = gidMatch ? gidMatch[1] : '0';
+
+  return { sheetId, gid };
+}
+
+export function buildGoogleSheetCsvUrl(inputUrl: string, method: 'gviz' | 'export' = 'gviz'): string {
+  const parsed = extractGoogleSheetId(inputUrl);
+  if (!parsed) {
+    return inputUrl.trim();
+  }
+  if (method === 'export') {
+    return `https://docs.google.com/spreadsheets/d/${parsed.sheetId}/export?format=csv&gid=${parsed.gid}`;
+  }
+  return `https://docs.google.com/spreadsheets/d/${parsed.sheetId}/gviz/tq?tqx=out:csv&gid=${parsed.gid}`;
+}
+
+// Robust CSV Line & Column Parser (handles multiline, quotes, commas, semicolons)
+export function parseCsvString(csvText: string): string[][] {
+  const cleanText = csvText.replace(/^\uFEFF/, ''); // strip BOM
+  const rows: string[][] = [];
+  let currentRow: string[] = [];
+  let currentCell = '';
+  let insideQuotes = false;
+
+  // Auto-detect delimiter from first non-empty line: comma or semicolon or tab
+  const firstLine = cleanText.split(/\r\n|\n|\r/)[0] || '';
+  const commaCount = (firstLine.match(/,/g) || []).length;
+  const semicolonCount = (firstLine.match(/;/g) || []).length;
+  const tabCount = (firstLine.match(/\t/g) || []).length;
+  
+  let delimiter = ',';
+  if (semicolonCount > commaCount && semicolonCount > tabCount) delimiter = ';';
+  else if (tabCount > commaCount && tabCount > semicolonCount) delimiter = '\t';
+
+  for (let i = 0; i < cleanText.length; i++) {
+    const char = cleanText[i];
+    const nextChar = cleanText[i + 1];
+
+    if (char === '"') {
+      if (insideQuotes && nextChar === '"') {
+        currentCell += '"';
+        i++; // skip escaped quote
+      } else {
+        insideQuotes = !insideQuotes;
+      }
+    } else if (char === delimiter && !insideQuotes) {
+      currentRow.push(currentCell.trim());
+      currentCell = '';
+    } else if ((char === '\r' || char === '\n') && !insideQuotes) {
+      if (char === '\r' && nextChar === '\n') i++; // handle CRLF
+      currentRow.push(currentCell.trim());
+      currentCell = '';
+      if (currentRow.some((c) => c.length > 0)) {
+        rows.push(currentRow);
+      }
+      currentRow = [];
+    } else {
+      currentCell += char;
+    }
+  }
+
+  if (currentCell.length > 0 || currentRow.length > 0) {
+    currentRow.push(currentCell.trim());
+    if (currentRow.some((c) => c.length > 0)) {
+      rows.push(currentRow);
+    }
+  }
+
+  return rows;
+}
+
+// Match header key names with fuzzy aliases
+function normalizeHeaderName(header: string): string {
+  return header.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+// Convert parsed CSV rows into Employee objects
+export function parseRowsToEmployees(
+  rawRows: string[][],
+  currentEmployees: Employee[] = []
+): { employees: Employee[]; preview: ImportPreview; errors: string[] } {
+  const errors: string[] = [];
+  if (!rawRows || rawRows.length === 0) {
+    return {
+      employees: [],
+      preview: {
+        totalRows: 0,
+        newRows: 0,
+        updateRows: 0,
+        sampleRows: [],
+        detectedColumns: [],
+        periods: [],
+        parsedEmployees: []
+      },
+      errors: ['File/sheet kosong atau tidak memiliki baris data.']
+    };
+  }
+
+  // 1. Dynamic Header Row Finder: Find the row containing core column keywords
+  let headerRowIndex = -1;
+  for (let r = 0; r < Math.min(rawRows.length, 25); r++) {
+    const row = rawRows[r];
+    if (!row) continue;
+    const rowJoined = row.map((c) => normalizeHeaderName(c)).join(' ');
+    if (
+      (rowJoined.includes('empid') || rowJoined.includes('idkaryawan') || rowJoined.includes('nip')) &&
+      (rowJoined.includes('empname') || rowJoined.includes('namakaryawan') || rowJoined.includes('nama'))
+    ) {
+      headerRowIndex = r;
+      break;
+    }
+  }
+
+  // Fallback: If no empId/empName keywords found, search for any standard columns
+  if (headerRowIndex === -1) {
+    for (let r = 0; r < Math.min(rawRows.length, 25); r++) {
+      const row = rawRows[r];
+      if (!row) continue;
+      const nonEmpties = row.filter((c) => c && c.trim().length > 0);
+      if (nonEmpties.length >= 5) {
+        headerRowIndex = r;
+        break;
+      }
+    }
+  }
+
+  if (headerRowIndex === -1) {
+    headerRowIndex = 0;
+  }
+
+  const headerRow = rawRows[headerRowIndex] || [];
+  let candidateDataRows = rawRows.slice(headerRowIndex + 1);
+
+  // Map header index to employee fields
+  const colMap: Record<string, number> = {};
+  const skillColMap: Record<string, number> = {};
+
+  headerRow.forEach((col, idx) => {
+    const rawCol = col.trim();
+    if (!rawCol) return;
+    const norm = normalizeHeaderName(rawCol);
+
+    if (['empid', 'idkaryawan', 'employeeid', 'nip', 'nik', 'id'].includes(norm)) {
+      colMap['empId'] = idx;
+    } else if (['empname', 'namakaryawan', 'nama', 'name', 'employeename', 'namalengkap'].includes(norm)) {
+      colMap['empName'] = idx;
+    } else if (['divisi', 'division', 'div'].includes(norm)) {
+      colMap['divisi'] = idx;
+    } else if (['department', 'departemen', 'dept'].includes(norm)) {
+      colMap['department'] = idx;
+    } else if (['section', 'seksi', 'bagian'].includes(norm)) {
+      colMap['section'] = idx;
+    } else if (['grade', 'golongan'].includes(norm)) {
+      colMap['grade'] = idx;
+    } else if (['jobgrade', 'jg'].includes(norm)) {
+      colMap['jobGrade'] = idx;
+    } else if (['jabatan', 'position', 'jobtitle', 'title', 'posisi'].includes(norm)) {
+      colMap['jabatan'] = idx;
+    } else if (['gender', 'jeniskelamin', 'sex', 'lp'].includes(norm)) {
+      colMap['gender'] = idx;
+    } else if (['tanggalpensiun', 'tglpensiun', 'pensiun', 'retirementdate'].includes(norm)) {
+      colMap['tanggalPensiun'] = idx;
+    } else if (['pic', 'atasan', 'supervisor'].includes(norm)) {
+      colMap['pic'] = idx;
+    } else if (['tahun', 'year', 'periodetahun'].includes(norm)) {
+      colMap['tahun'] = idx;
+    } else if (['bulan', 'month', 'periodebulan'].includes(norm)) {
+      colMap['bulan'] = idx;
+    } else if (['standard', 'standar', 'target', 'threshold'].includes(norm)) {
+      colMap['standard'] = idx;
+    } else if (['total', 'totalscore', 'score', 'skor'].includes(norm)) {
+      colMap['total'] = idx;
+    } else if (['result', 'hasil', 'status', 'msus'].includes(norm)) {
+      colMap['result'] = idx;
+    } else if (['gap', 'selisih'].includes(norm)) {
+      colMap['gap'] = idx;
+    } else if (['no', 'nomor'].includes(norm)) {
+      colMap['no'] = idx;
+    }
+
+    // Check if this header matches any skill code
+    INITIAL_SKILL_META.forEach((sm) => {
+      const smCodeNorm = normalizeHeaderName(sm.code);
+      if (
+        norm === smCodeNorm ||
+        rawCol.toUpperCase() === sm.code.toUpperCase() ||
+        rawCol.toLowerCase() === sm.code.toLowerCase() ||
+        rawCol.replace(/\s+/g, '') === sm.code.replace(/\s+/g, '')
+      ) {
+        skillColMap[sm.code] = idx;
+      }
+    });
+  });
+
+  // Fallback for missing empId or empName index
+  if (colMap['empId'] === undefined) {
+    for (let i = 0; i < headerRow.length; i++) {
+      const norm = normalizeHeaderName(headerRow[i]);
+      if (norm.includes('id') || norm.includes('emp')) {
+        colMap['empId'] = i;
+        break;
+      }
+    }
+  }
+
+  // 2. Filter out sub-header row (e.g., skill descriptions like "Decalfication & SACC Process MSG...")
+  if (candidateDataRows.length > 0) {
+    const firstRow = candidateDataRows[0];
+    const firstIdVal = colMap['empId'] !== undefined ? firstRow[colMap['empId']]?.trim() : '';
+    const firstRowJoined = firstRow.join(' ').toLowerCase();
+
+    if (
+      (!firstIdVal || isNaN(Number(firstIdVal))) &&
+      (firstRowJoined.includes('process') ||
+        firstRowJoined.includes('decalfication') ||
+        firstRowJoined.includes('fermentation') ||
+        firstRowJoined.includes('packaging') ||
+        firstRowJoined.includes('warehouse') ||
+        firstRowJoined.includes('management') ||
+        firstRowJoined.includes('maintenance'))
+    ) {
+      // It's a subheader description row -> skip it
+      candidateDataRows = candidateDataRows.slice(1);
+    }
+  }
+
+  const currentYear = new Date().getFullYear();
+  const currentMonth = new Date().getMonth() + 1;
+
+  let maxRowIndex = currentEmployees.reduce((m, e) => Math.max(m, e.rowIndex || 0), 6);
+  let maxNo = currentEmployees.reduce((m, e) => Math.max(m, e.no || 0), 0);
+
+  const parsedEmployees: Employee[] = [];
+  const periodsSet = new Set<string>();
+
+  candidateDataRows.forEach((row, rIdx) => {
+    // Skip empty lines
+    if (!row || row.every((c) => !c || c.trim() === '')) return;
+
+    const rawEmpId = (colMap['empId'] !== undefined ? row[colMap['empId']] : '')?.trim();
+    const rawEmpName = (colMap['empName'] !== undefined ? row[colMap['empName']] : '')?.trim();
+
+    // Skip if row has no ID and no Name
+    if (!rawEmpId && !rawEmpName) return;
+
+    const empId = rawEmpId || `EMP-${rIdx + 1}`;
+    const empName = rawEmpName || `Karyawan ${rIdx + 1}`;
+    const divisi = (colMap['divisi'] !== undefined ? row[colMap['divisi']] : '')?.trim() || '';
+    const department = (colMap['department'] !== undefined ? row[colMap['department']] : '')?.trim() || '';
+    const section = (colMap['section'] !== undefined ? row[colMap['section']] : '')?.trim() || '';
+    const grade = (colMap['grade'] !== undefined ? row[colMap['grade']] : '')?.trim() || '';
+    const jobGrade = (colMap['jobGrade'] !== undefined ? row[colMap['jobGrade']] : '')?.trim() || '';
+    const jabatan = (colMap['jabatan'] !== undefined ? row[colMap['jabatan']] : '')?.trim() || '';
+
+    let gender = (colMap['gender'] !== undefined ? row[colMap['gender']] : 'L')?.trim().toUpperCase() || 'L';
+    if (gender.startsWith('P') || gender.startsWith('W') || gender === 'FEMALE') gender = 'P';
+    else gender = 'L';
+
+    const tanggalPensiun = (colMap['tanggalPensiun'] !== undefined ? row[colMap['tanggalPensiun']] : '')?.trim();
+    const pic = (colMap['pic'] !== undefined ? row[colMap['pic']] : '')?.trim();
+
+    // Parse Tahun & Bulan
+    let tahun = currentYear;
+    if (colMap['tahun'] !== undefined && row[colMap['tahun']]) {
+      const parsedTahun = parseInt(row[colMap['tahun']].trim(), 10);
+      if (!isNaN(parsedTahun) && parsedTahun >= 2000 && parsedTahun <= 2100) {
+        tahun = parsedTahun;
+      }
+    }
+
+    let bulan = currentMonth;
+    if (colMap['bulan'] !== undefined && row[colMap['bulan']]) {
+      const val = row[colMap['bulan']].trim();
+      const parsedBulan = parseInt(val, 10);
+      if (!isNaN(parsedBulan) && parsedBulan >= 1 && parsedBulan <= 12) {
+        bulan = parsedBulan;
+      } else {
+        const foundIdx = BULAN_LABELS.findIndex((b) => b.toLowerCase().startsWith(val.toLowerCase().slice(0, 3)));
+        if (foundIdx !== -1) bulan = foundIdx + 1;
+      }
+    }
+
+    periodsSet.add(`${BULAN_LABELS[bulan - 1] || bulan} ${tahun}`);
+
+    // Parse Skills Matrix
+    const skills: Record<string, boolean> = {};
+    let checkedSkillsCount = 0;
+
+    INITIAL_SKILL_META.forEach((sm) => {
+      skills[sm.code] = false;
+      const colIdx = skillColMap[sm.code];
+      if (colIdx !== undefined && row[colIdx] !== undefined) {
+        const val = row[colIdx].trim().toLowerCase();
+        if (['1', 'true', 'v', 'x', 'ya', 'yes', 'ok', 'ms', '✓', '✔'].includes(val)) {
+          skills[sm.code] = true;
+          checkedSkillsCount++;
+        }
+      }
+    });
+
+    // Custom standard if provided in sheet
+    let customStandard: number | null = null;
+    if (colMap['standard'] !== undefined && row[colMap['standard']]) {
+      const parsedStd = parseInt(row[colMap['standard']].trim(), 10);
+      if (!isNaN(parsedStd) && parsedStd > 0) customStandard = parsedStd;
+    }
+
+    // Sheet Total fallback if skill columns were unaligned
+    if (checkedSkillsCount === 0 && colMap['total'] !== undefined && row[colMap['total']]) {
+      const sheetTotal = parseInt(row[colMap['total']].trim(), 10);
+      if (!isNaN(sheetTotal) && sheetTotal > 0) {
+        // Assign first N skills to simulate total count for visualization
+        for (let s = 0; s < Math.min(sheetTotal, INITIAL_SKILL_META.length); s++) {
+          skills[INITIAL_SKILL_META[s].code] = true;
+        }
+      }
+    }
+
+    const calc = calculateEmployeeScore(skills, jabatan, customStandard);
+
+    parsedEmployees.push({
+      rowIndex: ++maxRowIndex,
+      no: ++maxNo,
+      empId,
+      empName,
+      divisi,
+      department,
+      section,
+      grade,
+      jobGrade,
+      jabatan,
+      gender,
+      tanggalPensiun,
+      pic,
+      tahun,
+      bulan,
+      jobCategory: calc.jobCategory,
+      totalScore: calc.totalScore,
+      standard: calc.standard,
+      result: calc.result,
+      gap: calc.gap,
+      skills
+    });
+  });
+
+  // Calculate merge / update stats
+  let updateRows = 0;
+  let newRows = 0;
+
+  parsedEmployees.forEach((emp) => {
+    const isExisting = currentEmployees.some(
+      (e) =>
+        e.empId.trim().toLowerCase() === emp.empId.trim().toLowerCase() &&
+        Number(e.tahun) === Number(emp.tahun) &&
+        Number(e.bulan) === Number(emp.bulan)
+    );
+    if (isExisting) updateRows++;
+    else newRows++;
+  });
+
+  const preview: ImportPreview = {
+    totalRows: parsedEmployees.length,
+    newRows,
+    updateRows,
+    sampleRows: parsedEmployees.slice(0, 8),
+    detectedColumns: headerRow.map((h) => h.trim()).filter(Boolean),
+    periods: Array.from(periodsSet),
+    parsedEmployees
+  };
+
+  return { employees: parsedEmployees, preview, errors };
+}
+
+// -------------------------------------------------------------
+// Merge / Apply Data Strategy
+// -------------------------------------------------------------
+export function mergeEmployeesData(
+  currentEmployees: Employee[],
+  incomingEmployees: Employee[],
+  mode: 'merge' | 'replace' | 'append'
+): { updatedEmployees: Employee[]; addedCount: number; updatedCount: number } {
+  if (mode === 'replace') {
+    let rowIdx = 7;
+    let noCounter = 1;
+    const reindexed = incomingEmployees.map((e) => ({
+      ...e,
+      rowIndex: rowIdx++,
+      no: noCounter++
+    }));
+    saveStoredEmployees(reindexed);
+    return { updatedEmployees: reindexed, addedCount: incomingEmployees.length, updatedCount: 0 };
+  }
+
+  let addedCount = 0;
+  let updatedCount = 0;
+
+  if (mode === 'append') {
+    let nextRowIndex = currentEmployees.reduce((max, e) => Math.max(max, e.rowIndex || 0), 6) + 1;
+    let nextNo = currentEmployees.reduce((max, e) => Math.max(max, e.no || 0), 0) + 1;
+
+    const toAppend: Employee[] = [];
+    incomingEmployees.forEach((inc) => {
+      const exists = currentEmployees.some(
+        (e) =>
+          e.empId.trim().toLowerCase() === inc.empId.trim().toLowerCase() &&
+          Number(e.tahun) === Number(inc.tahun) &&
+          Number(e.bulan) === Number(inc.bulan)
+      );
+      if (!exists) {
+        toAppend.push({
+          ...inc,
+          rowIndex: nextRowIndex++,
+          no: nextNo++
+        });
+        addedCount++;
+      }
+    });
+
+    const updatedEmployees = [...currentEmployees, ...toAppend];
+    saveStoredEmployees(updatedEmployees);
+    return { updatedEmployees, addedCount, updatedCount };
+  }
+
+  // mode === 'merge' (Update existing, append new)
+  const mapKey = (e: Employee) => `${e.empId.trim().toLowerCase()}_${e.tahun}_${e.bulan}`;
+  const incomingMap = new Map<string, Employee>();
+  incomingEmployees.forEach((inc) => incomingMap.set(mapKey(inc), inc));
+
+  let nextRowIndex = currentEmployees.reduce((max, e) => Math.max(max, e.rowIndex || 0), 6) + 1;
+  let nextNo = currentEmployees.reduce((max, e) => Math.max(max, e.no || 0), 0) + 1;
+
+  const merged: Employee[] = [];
+  const processedKeys = new Set<string>();
+
+  // 1. Process current employees (update if matched, keep if not)
+  currentEmployees.forEach((cur) => {
+    const key = mapKey(cur);
+    if (incomingMap.has(key)) {
+      const incoming = incomingMap.get(key)!;
+      merged.push({
+        ...incoming,
+        rowIndex: cur.rowIndex,
+        no: cur.no
+      });
+      processedKeys.add(key);
+      updatedCount++;
+    } else {
+      merged.push(cur);
+    }
+  });
+
+  // 2. Append new employees that were not in current database
+  incomingEmployees.forEach((inc) => {
+    const key = mapKey(inc);
+    if (!processedKeys.has(key)) {
+      merged.push({
+        ...inc,
+        rowIndex: nextRowIndex++,
+        no: nextNo++
+      });
+      addedCount++;
+    }
+  });
+
+  saveStoredEmployees(merged);
+  return { updatedEmployees: merged, addedCount, updatedCount };
+}
+
+// -------------------------------------------------------------
+// Fetch Data from Google Sheet
+// -------------------------------------------------------------
+export async function fetchGoogleSheetData(
+  sheetUrl: string,
+  currentEmployees: Employee[]
+): Promise<SyncResponse<Employee[]>> {
+  try {
+    if (!sheetUrl || !sheetUrl.trim()) {
+      return {
+        success: false,
+        message: 'URL Google Sheet belum diisi.'
+      };
+    }
+
+    saveGoogleSheetUrl(sheetUrl);
+
+    let csvText = '';
+    let lastError = '';
+
+    // Attempt 1: GViz endpoint
+    const gvizUrl = buildGoogleSheetCsvUrl(sheetUrl, 'gviz');
+    try {
+      const res1 = await fetch(gvizUrl);
+      if (res1.ok) {
+        const text = await res1.text();
+        if (text && !text.includes('<!DOCTYPE html>') && !text.includes('<html') && !text.includes('Sign in to your Google Account')) {
+          csvText = text;
+        } else if (text.includes('Sign in to your Google Account') || text.includes('request-storage-access') || text.includes('show-login-page')) {
+          lastError = 'Akses Google Sheet saat ini masih dibatasi (Private/Perlu Login Google).';
+        }
+      }
+    } catch (e: any) {
+      lastError = e?.message || 'Gagal koneksi GViz';
+    }
+
+    // Attempt 2: Export format=csv endpoint (if attempt 1 did not yield csv)
+    if (!csvText) {
+      const exportUrl = buildGoogleSheetCsvUrl(sheetUrl, 'export');
+      try {
+        const res2 = await fetch(exportUrl);
+        if (res2.ok) {
+          const text = await res2.text();
+          if (text && !text.includes('<!DOCTYPE html>') && !text.includes('<html') && !text.includes('Sign in to your Google Account')) {
+            csvText = text;
+          } else if (text.includes('Sign in to your Google Account') || text.includes('request-storage-access') || text.includes('show-login-page')) {
+            lastError = 'Akses Google Sheet saat ini masih dibatasi (Private/Perlu Login Google).';
+          }
+        }
+      } catch (e: any) {
+        if (!lastError) lastError = e?.message || 'Gagal koneksi export CSV';
+      }
+    }
+
+    if (!csvText) {
+      if (lastError.includes('dibatasi') || lastError.includes('Private') || lastError.includes('Sign in')) {
+        return {
+          success: false,
+          message: 'Google Sheet memerlukan izin akses publik. Silakan buka spreadsheet di Google Docs, klik tombol "Bagikan" (Share) di kanan atas, lalu ubah akses menjadi "Siapa saja yang memiliki link dapat melihat" (Anyone with the link can view).'
+        };
+      }
+      return {
+        success: false,
+        message: `Tidak dapat mengunduh data spreadsheet: ${lastError || 'Pastikan link benar dan akses dibuka untuk publik (Anyone with the link can view)'}.`
+      };
+    }
+
+    const rawRows = parseCsvString(csvText);
+    const { employees, preview, errors } = parseRowsToEmployees(rawRows, currentEmployees);
+
+    if (!employees.length) {
+      return {
+        success: false,
+        message: 'Tidak ditemukan baris data karyawan yang valid pada Google Sheet tersebut.',
+        errors
+      };
+    }
+
+    return {
+      success: true,
+      message: `Berhasil menarik ${employees.length} data karyawan dari Google Sheet.`,
+      data: employees,
+      count: employees.length,
+      preview
+    };
+  } catch (err: any) {
+    console.error('Error fetching Google Sheet:', err);
+    return {
+      success: false,
+      message: `Terjadi kendala koneksi saat mengambil Google Sheet: ${err.message || 'CORS atau Jaringan terputus'}. Pastikan spreadsheet diatur public (Anyone with the link can view).`
+    };
+  }
+}
+
+// -------------------------------------------------------------
+// Supabase REST Database Sync
+// -------------------------------------------------------------
+export async function testSupabaseConnection(config: SupabaseConfig): Promise<{
+  success: boolean;
+  message: string;
+  rowCount?: number;
+  columns?: string[];
+}> {
+  if (!config.url || !config.anonKey) {
+    return { success: false, message: 'URL Supabase dan Anon API Key wajib diisi.' };
+  }
+
+  const cleanUrl = config.url.trim().replace(/\/+$/, '');
+  const tableName = config.tableName.trim() || 'employees_multi_skill';
+
+  try {
+    const client = getSupabaseClient(config);
+    if (client) {
+      const { count, error, data } = await client
+        .from(tableName)
+        .select('*', { count: 'exact', head: false })
+        .limit(1);
+
+      if (error) {
+        if (
+          error.code === 'PGRST205' ||
+          error.code === 'PGRST116' ||
+          error.code === '42P01' ||
+          error.message?.includes('schema cache') ||
+          error.message?.includes('relation') ||
+          error.message?.includes('does not exist') ||
+          error.message?.includes('Could not find the table')
+        ) {
+          return {
+            success: false,
+            message: `Tabel "${tableName}" belum dibuat di project Supabase Anda (PGRST205). Silakan klik tombol "Lihat Script SQL DDL" di atas, salin kodenya, lalu jalankan di menu SQL Editor pada Dashboard Supabase Anda.`
+          };
+        }
+        if (error.message?.includes('JWT') || error.message?.includes('apikey') || error.code === '401' || error.code === '403') {
+          return {
+            success: false,
+            message: `Kredensial API Key tidak valid atau dicegah oleh izin Row Level Security (RLS). Pastikan Anon Key benar dan RLS policy diaktifkan.`
+          };
+        }
+        return {
+          success: false,
+          message: `Error Supabase (${error.code || 'API'}): ${error.message}`
+        };
+      }
+
+      const columns = data && data[0] ? Object.keys(data[0]) : [];
+      return {
+        success: true,
+        message: `Koneksi Supabase aktif & terhubung ke tabel "${tableName}"!`,
+        rowCount: count ?? (data ? data.length : 0),
+        columns
+      };
+    }
+
+    // Fallback REST API
+    const res = await fetch(`${cleanUrl}/rest/v1/${tableName}?select=count`, {
+      method: 'GET',
+      headers: {
+        'apikey': config.anonKey,
+        'Authorization': `Bearer ${config.anonKey}`,
+        'Range-Unit': 'items',
+        'Range': '0-0',
+        'Prefer': 'count=exact'
+      }
+    });
+
+    if (res.ok) {
+      const countHeader = res.headers.get('content-range');
+      let rowCount = 0;
+      if (countHeader) {
+        const total = countHeader.split('/')[1];
+        if (total) rowCount = parseInt(total, 10) || 0;
+      }
+      return {
+        success: true,
+        message: `Koneksi Supabase berhasil! Terhubung ke tabel "${tableName}".`,
+        rowCount
+      };
+    }
+
+    if (res.status === 404 || res.status === 400) {
+      return {
+        success: false,
+        message: `Tabel "${tableName}" belum ada di database Supabase. Silakan jalankan script SQL di tab SQL Editor Supabase.`
+      };
+    }
+
+    return {
+      success: false,
+      message: `Koneksi gagal (HTTP ${res.status}: ${res.statusText}). Periksa URL dan API Key Anda.`
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: `Gagal menghubungi Supabase: ${err.message || 'Koneksi jaringan gagal'}. Pastikan URL berformat https://[project-id].supabase.co`
+    };
+  }
+}
+
+export async function fetchSupabaseEmployees(
+  config: SupabaseConfig,
+  currentEmployees: Employee[] = []
+): Promise<SyncResponse<Employee[]>> {
+  const test = await testSupabaseConnection(config);
+  if (!test.success) {
+    return { success: false, message: test.message };
+  }
+
+  const cleanUrl = config.url.trim().replace(/\/+$/, '');
+  const tableName = config.tableName.trim() || 'employees_multi_skill';
+
+  try {
+    let rows: any[] = [];
+    const client = getSupabaseClient(config);
+
+    if (client) {
+      const { data, error } = await client
+        .from(tableName)
+        .select('*')
+        .order('id', { ascending: true });
+
+      if (error) {
+        return { success: false, message: `Gagal mengambil data dari Supabase: ${error.message}` };
+      }
+      rows = data || [];
+    } else {
+      const res = await fetch(`${cleanUrl}/rest/v1/${tableName}?select=*&order=id.asc`, {
+        method: 'GET',
+        headers: {
+          'apikey': config.anonKey,
+          'Authorization': `Bearer ${config.anonKey}`
+        }
+      });
+
+      if (!res.ok) {
+        return {
+          success: false,
+          message: `Gagal mengambil data dari Supabase (HTTP ${res.status}).`
+        };
+      }
+      rows = await res.json();
+    }
+
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return {
+        success: false,
+        message: `Tabel Supabase "${tableName}" masih kosong. Anda dapat mengunggah (Push Sync) data saat ini dari Google Sheets atau data lokal ke Supabase.`
+      };
+    }
+
+    const currentYear = new Date().getFullYear();
+    const currentMonth = new Date().getMonth() + 1;
+    let maxRowIndex = currentEmployees.reduce((m, e) => Math.max(m, e.rowIndex || 0), 6);
+    let maxNo = currentEmployees.reduce((m, e) => Math.max(m, e.no || 0), 0);
+
+    const parsed: Employee[] = [];
+    const periodsSet = new Set<string>();
+
+    rows.forEach((r: any, idx: number) => {
+      const empId = r.emp_id || r.empId || r.nip || `EMP-${idx + 1}`;
+      const empName = r.emp_name || r.empName || r.nama || `Karyawan ${idx + 1}`;
+      const divisi = r.divisi || r.division || '';
+      const department = r.department || r.dept || '';
+      const section = r.section || r.seksi || '';
+      const grade = r.grade || '';
+      const jobGrade = r.job_grade || r.jobGrade || '';
+      const jabatan = r.jabatan || r.position || '';
+      const gender = (r.gender || 'L').toString().toUpperCase().startsWith('P') ? 'P' : 'L';
+      const tanggalPensiun = r.tanggal_pensiun || r.tanggalPensiun || '';
+      const pic = r.pic || '';
+      const tahun = parseInt(r.tahun || r.year || currentYear, 10);
+      const bulan = parseInt(r.bulan || r.month || currentMonth, 10);
+
+      periodsSet.add(`${BULAN_LABELS[bulan - 1] || bulan} ${tahun}`);
+
+      // Parse skills: handle JSONB object or stringified JSON
+      let skills: Record<string, boolean> = {};
+      INITIAL_SKILL_META.forEach((sm) => {
+        skills[sm.code] = false;
+      });
+
+      if (r.skills) {
+        let rawSkills = r.skills;
+        if (typeof rawSkills === 'string') {
+          try {
+            rawSkills = JSON.parse(rawSkills);
+          } catch (_) {}
+        }
+        if (typeof rawSkills === 'object' && rawSkills !== null) {
+          Object.keys(rawSkills).forEach((k) => {
+            if (rawSkills[k] === true || rawSkills[k] === 1 || rawSkills[k] === '1') {
+              skills[k] = true;
+            }
+          });
+        }
+      }
+
+      const customStandard = r.standard !== undefined && r.standard !== null ? Number(r.standard) : null;
+      const calc = calculateEmployeeScore(skills, jabatan, customStandard);
+
+      parsed.push({
+        rowIndex: ++maxRowIndex,
+        no: ++maxNo,
+        empId,
+        empName,
+        divisi,
+        department,
+        section,
+        grade,
+        jobGrade,
+        jabatan,
+        gender,
+        tanggalPensiun,
+        pic,
+        tahun,
+        bulan,
+        jobCategory: calc.jobCategory,
+        totalScore: calc.totalScore,
+        standard: calc.standard,
+        result: calc.result,
+        gap: calc.gap,
+        skills
+      });
+    });
+
+    let updateRows = 0;
+    let newRows = 0;
+    parsed.forEach((emp) => {
+      const isExisting = currentEmployees.some(
+        (e) =>
+          e.empId.trim().toLowerCase() === emp.empId.trim().toLowerCase() &&
+          Number(e.tahun) === Number(emp.tahun) &&
+          Number(e.bulan) === Number(emp.bulan)
+      );
+      if (isExisting) updateRows++;
+      else newRows++;
+    });
+
+    const preview: ImportPreview = {
+      totalRows: parsed.length,
+      newRows,
+      updateRows,
+      sampleRows: parsed.slice(0, 8),
+      detectedColumns: Object.keys(rows[0] || {}),
+      periods: Array.from(periodsSet),
+      parsedEmployees: parsed
+    };
+
+    return {
+      success: true,
+      message: `Berhasil menarik ${parsed.length} data karyawan dari database Supabase.`,
+      data: parsed,
+      count: parsed.length,
+      preview
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: `Gagal memuat data Supabase: ${err.message || 'Kesalahan jaringan'}`
+    };
+  }
+}
+
+export type SyncProgressCallback = (current: number, total: number, percentage: number, batchInfo?: string) => void;
+
+export async function pushEmployeesToSupabase(
+  config: SupabaseConfig,
+  employees: Employee[],
+  onProgress?: SyncProgressCallback
+): Promise<SyncResponse> {
+  const test = await testSupabaseConnection(config);
+  if (!test.success) {
+    return { success: false, message: test.message };
+  }
+
+  const tableName = config.tableName.trim() || 'employees_multi_skill';
+  const cleanUrl = config.url.trim().replace(/\/+$/, '');
+
+  // Format records for Supabase schema
+  const payload = employees.map((e) => ({
+    emp_id: e.empId,
+    emp_name: e.empName,
+    divisi: e.divisi || null,
+    department: e.department || null,
+    section: e.section || null,
+    grade: e.grade || null,
+    job_grade: e.jobGrade || null,
+    jabatan: e.jabatan || null,
+    gender: e.gender || 'L',
+    tanggal_pensiun: e.tanggalPensiun || null,
+    pic: e.pic || null,
+    tahun: e.tahun,
+    bulan: e.bulan,
+    job_category: e.jobCategory || null,
+    total_score: e.totalScore || 0,
+    standard: e.standard || null,
+    result: e.result || 'US',
+    gap: e.gap || 0,
+    skills: e.skills || {},
+    updated_at: new Date().toISOString()
+  }));
+
+  const CHUNK_SIZE = 50;
+  const totalRecords = payload.length;
+  const totalBatches = Math.ceil(totalRecords / CHUNK_SIZE);
+  const client = getSupabaseClient(config);
+
+  try {
+    for (let i = 0; i < totalBatches; i++) {
+      const start = i * CHUNK_SIZE;
+      const end = Math.min(start + CHUNK_SIZE, totalRecords);
+      const chunk = payload.slice(start, end);
+
+      if (client) {
+        // Upsert on conflict (emp_id, tahun, bulan)
+        const { error } = await client
+          .from(tableName)
+          .upsert(chunk, {
+            onConflict: 'emp_id,tahun,bulan',
+            ignoreDuplicates: false
+          });
+
+        if (error) {
+          return {
+            success: false,
+            message: `Gagal mengirim batch ${i + 1}/${totalBatches}: ${error.message}`
+          };
+        }
+      } else {
+        // Fallback REST POST with Prefer: resolution=merge-duplicates
+        const res = await fetch(`${cleanUrl}/rest/v1/${tableName}`, {
+          method: 'POST',
+          headers: {
+            'apikey': config.anonKey,
+            'Authorization': `Bearer ${config.anonKey}`,
+            'Content-Type': 'application/json',
+            'Prefer': 'resolution=merge-duplicates'
+          },
+          body: JSON.stringify(chunk)
+        });
+
+        if (!res.ok && res.status !== 201 && res.status !== 200) {
+          const errText = await res.text();
+          return {
+            success: false,
+            message: `Gagal mengirim batch ${i + 1}/${totalBatches} (HTTP ${res.status}): ${errText}`
+          };
+        }
+      }
+
+      const currentCount = end;
+      const pct = Math.round((currentCount / totalRecords) * 100);
+      if (onProgress) {
+        onProgress(currentCount, totalRecords, pct, `Batch ${i + 1}/${totalBatches} (${currentCount}/${totalRecords} data)`);
+      }
+    }
+
+    return {
+      success: true,
+      message: `Berhasil mensinkronkan ${employees.length} data karyawan ke tabel Supabase "${tableName}".`,
+      count: employees.length,
+      syncedBatches: totalBatches,
+      totalBatches
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: `Gagal mengirim data ke Supabase: ${err.message || 'Kesalahan jaringan'}`
+    };
+  }
+}
+
+// Direct Pipeline: Fetch from Google Sheet CSV, parse, and upload straight to Supabase
+export async function syncGoogleSheetsDirectToSupabase(
+  sheetUrl: string,
+  config: SupabaseConfig,
+  currentEmployees: Employee[] = [],
+  onProgress?: SyncProgressCallback
+): Promise<SyncResponse<Employee[]>> {
+  // 1. Fetch from Google Sheet
+  const sheetResult = await fetchGoogleSheetData(sheetUrl, currentEmployees);
+  if (!sheetResult.success || !sheetResult.data || !sheetResult.data.length) {
+    return {
+      success: false,
+      message: `Gagal menarik data dari Google Sheets: ${sheetResult.message}`
+    };
+  }
+
+  const fetchedEmployees = sheetResult.data;
+
+  // 2. Push to Supabase with progress
+  const pushResult = await pushEmployeesToSupabase(config, fetchedEmployees, onProgress);
+  if (!pushResult.success) {
+    return {
+      success: false,
+      message: `Data berhasil ditarik dari Google Sheets (${fetchedEmployees.length} baris), namun gagal diunggah ke Supabase: ${pushResult.message}`
+    };
+  }
+
+  return {
+    success: true,
+    message: `Sukses sinkronisasi langsung! ${fetchedEmployees.length} data karyawan dari Google Sheets berhasil disimpan ke tabel Supabase "${config.tableName}".`,
+    data: fetchedEmployees,
+    count: fetchedEmployees.length,
+    preview: sheetResult.preview
+  };
+}
+
+// -------------------------------------------------------------
+// Schema Dictionary / Documentation for Easy Understanding
+// -------------------------------------------------------------
+export function getSupabaseSchemaDictionary(): SchemaFieldDoc[] {
+  return [
+    {
+      column: 'emp_id',
+      type: 'VARCHAR(50) NOT NULL',
+      description: 'Nomor Induk Karyawan / ID unik (misal: AJN-MJK-0101). Bagian dari Composite Key.',
+      sheetSource: 'Kolom "Emp ID" / "ID Karyawan"',
+      sample: 'AJN-MJK-0101'
+    },
+    {
+      column: 'emp_name',
+      type: 'VARCHAR(150) NOT NULL',
+      description: 'Nama lengkap karyawan.',
+      sheetSource: 'Kolom "Emp Name" / "Nama Karyawan"',
+      sample: 'Ahmad Fadhil Kurniawan'
+    },
+    {
+      column: 'divisi',
+      type: 'VARCHAR(100)',
+      description: 'Divisi tempat karyawan bertugas (misal: Produksi MSG & Seasoning).',
+      sheetSource: 'Kolom "Divisi"',
+      sample: 'Produksi MSG & Seasoning'
+    },
+    {
+      column: 'department',
+      type: 'VARCHAR(100)',
+      description: 'Departemen kerja karyawan.',
+      sheetSource: 'Kolom "Department"',
+      sample: 'Fermentation Department'
+    },
+    {
+      column: 'section',
+      type: 'VARCHAR(100)',
+      description: 'Seksi/unit kerja spesifik.',
+      sheetSource: 'Kolom "Section"',
+      sample: 'Inoculum & Media Section'
+    },
+    {
+      column: 'grade',
+      type: 'VARCHAR(20)',
+      description: 'Pangkat/golongan karyawan (M1-M4, ST1-ST4, REM1, dll).',
+      sheetSource: 'Kolom "Grade"',
+      sample: 'M4'
+    },
+    {
+      column: 'job_grade',
+      type: 'VARCHAR(20)',
+      description: 'Tingkat Job Grade (misal: JG-11, JG-06).',
+      sheetSource: 'Kolom "Job Grade"',
+      sample: 'JG-11'
+    },
+    {
+      column: 'jabatan',
+      type: 'VARCHAR(150)',
+      description: 'Nama jabatan resmi / posisi kerja karyawan.',
+      sheetSource: 'Kolom "Jabatan"',
+      sample: 'Department Manager Fermentation'
+    },
+    {
+      column: 'gender',
+      type: "VARCHAR(10) DEFAULT 'L'",
+      description: 'Jenis kelamin karyawan ("L" = Laki-laki, "P" = Perempuan).',
+      sheetSource: 'Kolom "Gender" / "L/P"',
+      sample: 'L'
+    },
+    {
+      column: 'tanggal_pensiun',
+      type: 'VARCHAR(50)',
+      description: 'Tanggal perkiraan pensiun karyawan (format: dd MMM yyyy).',
+      sheetSource: 'Kolom "Tanggal Pensiun"',
+      sample: '14 Nov 2038'
+    },
+    {
+      column: 'pic',
+      type: 'VARCHAR(150)',
+      description: 'Nama Person in Charge / Penilai / Atasan langsung.',
+      sheetSource: 'Kolom "PIC" / "Evaluator"',
+      sample: 'Rudi Hartono'
+    },
+    {
+      column: 'tahun',
+      type: 'INTEGER NOT NULL',
+      description: 'Tahun periode evaluasi multi-skill (misal: 2026). Bagian dari Composite Key.',
+      sheetSource: 'Kolom "Tahun" / Header Periode',
+      sample: '2026'
+    },
+    {
+      column: 'bulan',
+      type: 'INTEGER NOT NULL',
+      description: 'Bulan periode evaluasi (1 s/d 12, misal 8 = Agustus). Bagian dari Composite Key.',
+      sheetSource: 'Kolom "Bulan" / Header Periode',
+      sample: '8'
+    },
+    {
+      column: 'job_category',
+      type: 'VARCHAR(50)',
+      description: 'Kategori jabatan penentu standar skill (Dept. Manager up, ASM - SM, LL - Foreman, Operator, Non Operator).',
+      sheetSource: 'Otomatis dihitung / Kolom "Job Category"',
+      sample: 'Dept. Manager up'
+    },
+    {
+      column: 'total_score',
+      type: 'INTEGER DEFAULT 0',
+      description: 'Total jumlah skill yang telah dikuasai (dihitung dari checklist skill bernilai true).',
+      sheetSource: 'Otomatis dihitung / Kolom "Total Score"',
+      sample: '11'
+    },
+    {
+      column: 'standard',
+      type: 'INTEGER',
+      description: 'Target standar minimal skill yang harus dikuasai untuk kategori jabatan tersebut.',
+      sheetSource: 'Otomatis dihitung / Kolom "Standard"',
+      sample: '10'
+    },
+    {
+      column: 'result',
+      type: 'VARCHAR(10)',
+      description: 'Hasil evaluasi kualifikasi ("MS" = Multi-Skill / Memenuhi, "US" = Under-Skill / Belum Memenuhi).',
+      sheetSource: 'Otomatis dihitung / Kolom "Result"',
+      sample: 'MS'
+    },
+    {
+      column: 'gap',
+      type: 'INTEGER',
+      description: 'Selisih antara total skill yang dikuasai dengan standar (total_score - standard).',
+      sheetSource: 'Otomatis dihitung / Kolom "Gap"',
+      sample: '1'
+    },
+    {
+      column: 'skills',
+      type: "JSONB DEFAULT '{}'::jsonb",
+      description: 'Objek JSON berisi 92+ kode kompetensi skill dan status penguasaan (key-value boolean: {"1.1": true, "1.2": false, ...}). Sangat fleksibel & mudah di-query.',
+      sheetSource: '92+ Kolom Matriks Skill (1.1 s/d 17.5)',
+      sample: '{"1.1": true, "1.2": true, "1.3": false}'
+    }
+  ];
+}
+
+// -------------------------------------------------------------
+// SQL Schema Generator for Supabase
+// -------------------------------------------------------------
+export function generateSupabaseSqlTable(tableName: string = 'employees_multi_skill'): string {
+  return `-- ==========================================================
+-- AJINOMOTO MULTI-SKILL SYSTEM - SUPABASE DATABASE SCHEMA
+-- Jalankan query ini di menu 'SQL Editor' pada dashboard Supabase
+-- ==========================================================
+
+-- 1. Buat Tabel Multi-Skill Karyawan
+CREATE TABLE IF NOT EXISTS public.${tableName} (
+    id BIGSERIAL PRIMARY KEY,
+    emp_id VARCHAR(50) NOT NULL,
+    emp_name VARCHAR(150) NOT NULL,
+    divisi VARCHAR(100),
+    department VARCHAR(100),
+    section VARCHAR(100),
+    grade VARCHAR(20),
+    job_grade VARCHAR(20),
+    jabatan VARCHAR(150),
+    gender VARCHAR(10) DEFAULT 'L',
+    tanggal_pensiun VARCHAR(50),
+    pic VARCHAR(150),
+    tahun INTEGER NOT NULL DEFAULT EXTRACT(YEAR FROM CURRENT_DATE),
+    bulan INTEGER NOT NULL DEFAULT EXTRACT(MONTH FROM CURRENT_DATE),
+    job_category TEXT,
+    total_score INTEGER DEFAULT 0,
+    standard INTEGER,
+    result VARCHAR(10),
+    gap INTEGER,
+    skills JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT unique_emp_period UNIQUE (emp_id, tahun, bulan)
+);
+
+-- 2. Index Performa Tinggi untuk Pencarian & Filter Cepat
+CREATE INDEX IF NOT EXISTS idx_${tableName}_period ON public.${tableName} (tahun, bulan);
+CREATE INDEX IF NOT EXISTS idx_${tableName}_div_dept ON public.${tableName} (divisi, department);
+CREATE INDEX IF NOT EXISTS idx_${tableName}_emp_id ON public.${tableName} (emp_id);
+CREATE INDEX IF NOT EXISTS idx_${tableName}_result ON public.${tableName} (result);
+CREATE INDEX IF NOT EXISTS idx_${tableName}_skills_gin ON public.${tableName} USING gin (skills);
+
+-- 3. Aktifkan Row Level Security (RLS) & Berikan Izin Akses Anon / Auth
+ALTER TABLE public.${tableName} ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Allow public read access" 
+ON public.${tableName} FOR SELECT USING (true);
+
+CREATE POLICY "Allow public insert/update access" 
+ON public.${tableName} FOR ALL USING (true) WITH CHECK (true);
+
+-- 4. View Rekapitulasi Otomatis (Opsional untuk Dashboard)
+CREATE OR REPLACE VIEW public.v_${tableName}_summary AS
+SELECT 
+    tahun,
+    bulan,
+    divisi,
+    department,
+    COUNT(*) AS total_karyawan,
+    COUNT(CASE WHEN result = 'MS' THEN 1 END) AS total_ms,
+    COUNT(CASE WHEN result = 'US' THEN 1 END) AS total_us,
+    ROUND((COUNT(CASE WHEN result = 'MS' THEN 1 END)::NUMERIC / NULLIF(COUNT(*), 0) * 100), 1) AS ms_rate_percent,
+    ROUND(AVG(total_score), 2) AS rata_rata_score
+FROM public.${tableName}
+GROUP BY tahun, bulan, divisi, department;
+`;
+}
+
+// -------------------------------------------------------------
+// Download Sample CSV Template
+// -------------------------------------------------------------
+export function downloadSampleImportCsv(): void {
+  const sampleHeaders = [
+    'No', 'Emp ID', 'Emp Name', 'Divisi', 'Department', 'Section', 'Grade', 'Job Grade',
+    'Jabatan', 'Gender', 'Tanggal Pensiun', 'PIC', 'Tahun', 'Bulan'
+  ].concat(INITIAL_SKILL_META.slice(0, 15).map((s) => s.code));
+
+  const sampleRow1 = [
+    '1', 'AJN-MJK-0101', 'Ahmad Fadhil Kurniawan', 'Produksi MSG & Seasoning', 'Fermentation Department',
+    'Inoculum & Media Section', 'M4', 'JG-11', 'Department Manager Fermentation', 'L', '14 Nov 2038', 'Rudi Hartono', '2026', '8',
+    '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '0', '0', '0', '0'
+  ];
+
+  const sampleRow2 = [
+    '2', 'AJN-MJK-0103', 'Budi Santoso', 'Produksi MSG & Seasoning', 'Fermentation Department',
+    'Sterile Systems', 'ST4', 'JG-06', 'Line Leader Inoculum', 'L', '10 Mei 2045', 'Siti Nurhaliza', '2026', '8',
+    '1', '1', '1', '0', '1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0'
+  ];
+
+  const csvContent = [
+    sampleHeaders.join(','),
+    sampleRow1.join(','),
+    sampleRow2.join(',')
+  ].join('\r\n');
+
+  const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `Template_Import_MultiSkill_Ajinomoto.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
