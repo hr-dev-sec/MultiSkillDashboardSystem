@@ -701,105 +701,233 @@ export const ExportPdfModal: React.FC<ExportPdfModalProps> = ({
                   <div className="p-3.5 space-y-3 flex-1 flex flex-col justify-between">
                     {activePreviewPage === 'page1' && (
                       <div className="space-y-2.5 animate-fadeIn">
-                        <p className="font-bold text-[#0E2340] border-b pb-1 text-[11px]">
-                          1. Rekapitulasi Eksekutif &amp; KPI
-                        </p>
+                        {/* 4 KPI Cards matching Page 1 */}
                         <div className="grid grid-cols-4 gap-1.5 text-center">
-                          <div className="p-1.5 rounded bg-slate-50 border">
-                            <span className="text-[7px] text-slate-500 uppercase">Manpower</span>
-                            <p className="font-bold text-slate-800 text-[11px]">{totalManpower}</p>
+                          <div className="p-1.5 rounded bg-white border border-slate-200 relative overflow-hidden text-left pl-2.5">
+                            <div className="absolute left-0 top-0 bottom-0 w-1 bg-[#0E2340]"></div>
+                            <p className="font-bold text-slate-800 text-[11px] leading-tight">{totalManpower}</p>
+                            <span className="text-[6.5px] text-slate-500 block mt-0.5">Total Karyawan</span>
                           </div>
-                          <div className="p-1.5 rounded bg-emerald-50 border border-emerald-200">
-                            <span className="text-[7px] text-emerald-600 uppercase">MS</span>
-                            <p className="font-bold text-emerald-600 text-[11px]">{totalMS}</p>
+                          <div className="p-1.5 rounded bg-white border border-slate-200 relative overflow-hidden text-left pl-2.5">
+                            <div className="absolute left-0 top-0 bottom-0 w-1 bg-[#0FA968]"></div>
+                            <p className="font-bold text-slate-800 text-[11px] leading-tight">{totalMS}</p>
+                            <span className="text-[6.5px] text-slate-500 block mt-0.5">Standar (MS)</span>
                           </div>
-                          <div className="p-1.5 rounded bg-rose-50 border border-rose-200">
-                            <span className="text-[7px] text-rose-600 uppercase">US</span>
-                            <p className="font-bold text-rose-600 text-[11px]">{totalUS}</p>
+                          <div className="p-1.5 rounded bg-white border border-slate-200 relative overflow-hidden text-left pl-2.5">
+                            <div className="absolute left-0 top-0 bottom-0 w-1 bg-[#E10600]"></div>
+                            <p className="font-bold text-slate-800 text-[11px] leading-tight">{totalUS}</p>
+                            <span className="text-[6.5px] text-slate-500 block mt-0.5">Belum Standar (US)</span>
                           </div>
-                          <div className="p-1.5 rounded bg-blue-50 border border-blue-200">
-                            <span className="text-[7px] text-blue-600 uppercase">% MS</span>
-                            <p className="font-bold text-blue-600 text-[11px]">{pctFormatted}</p>
+                          <div className="p-1.5 rounded bg-white border border-slate-200 relative overflow-hidden text-left pl-2.5">
+                            <div className="absolute left-0 top-0 bottom-0 w-1 bg-[#B8874B]"></div>
+                            <p className="font-bold text-slate-800 text-[11px] leading-tight">{pctFormatted}</p>
+                            <span className="text-[6.5px] text-slate-500 block mt-0.5">Pencapaian</span>
                           </div>
                         </div>
 
-                        <p className="font-bold text-[#0E2340] pt-1 text-[10px]">2. Ringkasan per Divisi Utama</p>
-                        <div className="border rounded overflow-hidden">
-                          <table className="w-full text-[8.5px] text-left">
-                            <thead className="bg-[#0E2340] text-white">
-                              <tr>
-                                <th className="p-1">Divisi</th>
-                                <th className="p-1 text-center">Total</th>
-                                <th className="p-1 text-center">MS</th>
-                                <th className="p-1 text-center">US</th>
-                                <th className="p-1 text-center">% MS</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {byDivisi.slice(0, 4).map((d) => {
-                                const total = d.ms + d.us;
-                                const pct = total > 0 ? ((d.ms / total) * 100).toFixed(1) + '%' : '0%';
-                                return (
-                                  <tr key={d.label} className="border-t">
-                                    <td className="p-1 font-semibold">{d.label}</td>
-                                    <td className="p-1 text-center">{total}</td>
-                                    <td className="p-1 text-center text-emerald-600 font-bold">{d.ms}</td>
-                                    <td className="p-1 text-center text-rose-600 font-bold">{d.us}</td>
-                                    <td className="p-1 text-center font-bold">{pct}</td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
+                        {/* Filter Aktif line */}
+                        <div className="text-[7.5px] space-y-0.5 pt-0.5">
+                          <p className="font-bold text-[#B8874B] uppercase tracking-wide text-[7px]">FILTER AKTIF</p>
+                          <p className="text-slate-600">
+                            Tahun: {thnStr} | Bulan: {blnStr} | Divisi: {divStr || 'Semua'} | Department: {deptStr || 'Semua'} | Jabatan: {jabStr || 'Semua'}
+                          </p>
+                        </div>
+
+                        {/* Rekap per Divisi */}
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className="w-2 h-2 bg-[#B8874B] inline-block"></span>
+                            <p className="font-bold text-[#0E2340] text-[9.5px]">Rekap per Divisi</p>
+                          </div>
+                          <div className="border border-slate-200 rounded overflow-hidden">
+                            <table className="w-full text-[7.5px] text-left">
+                              <thead className="bg-[#0E2340] text-white">
+                                <tr>
+                                  <th className="p-1 pl-1.5">Divisi</th>
+                                  <th className="p-1 text-center w-8">MS</th>
+                                  <th className="p-1 text-center w-8">US</th>
+                                  <th className="p-1 text-center w-9">Total</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {byDivisi.slice(0, 9).map((d, i) => {
+                                  const total = d.ms + d.us;
+                                  return (
+                                    <tr key={d.label} className={i % 2 === 1 ? 'bg-slate-50/80' : 'bg-white'}>
+                                      <td className="p-0.5 pl-1.5 font-normal text-slate-800 truncate max-w-[140px]">{d.label}</td>
+                                      <td className="p-0.5 text-center text-slate-600">{d.ms}</td>
+                                      <td className="p-0.5 text-center text-slate-600">{d.us}</td>
+                                      <td className="p-0.5 text-center font-normal text-slate-800">{total}</td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+
+                        {/* Rekap per Department (Part 1 on Page 1) */}
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className="w-2 h-2 bg-[#B8874B] inline-block"></span>
+                            <p className="font-bold text-[#0E2340] text-[9.5px]">Rekap per Department</p>
+                          </div>
+                          <div className="border border-slate-200 rounded overflow-hidden">
+                            <table className="w-full text-[7.5px] text-left">
+                              <thead className="bg-[#0E2340] text-white">
+                                <tr>
+                                  <th className="p-1 pl-1.5">Department</th>
+                                  <th className="p-1 text-center w-8">MS</th>
+                                  <th className="p-1 text-center w-8">US</th>
+                                  <th className="p-1 text-center w-9">Total</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {byDepartment.slice(0, 7).map((d, i) => {
+                                  const total = d.ms + d.us;
+                                  return (
+                                    <tr key={d.label} className={i % 2 === 1 ? 'bg-slate-50/80' : 'bg-white'}>
+                                      <td className="p-0.5 pl-1.5 font-normal text-slate-800 truncate max-w-[140px]">{d.label}</td>
+                                      <td className="p-0.5 text-center text-slate-600">{d.ms}</td>
+                                      <td className="p-0.5 text-center text-slate-600">{d.us}</td>
+                                      <td className="p-0.5 text-center font-normal text-slate-800">{total}</td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
                         </div>
                       </div>
                     )}
 
                     {activePreviewPage === 'page2' && (
                       <div className="space-y-2.5 animate-fadeIn">
-                        <p className="font-bold text-[#0E2340] border-b pb-1 text-[11px]">
-                          3. Rekapitulasi per Grade &amp; Kategori Jabatan
-                        </p>
-                        <div className="border rounded overflow-hidden">
-                          <table className="w-full text-[8.5px] text-left">
+                        {/* Rekap per Department continuation */}
+                        <div className="border border-slate-200 rounded overflow-hidden">
+                          <table className="w-full text-[7.5px] text-left">
                             <thead className="bg-[#0E2340] text-white">
                               <tr>
-                                <th className="p-1">Kategori Jabatan</th>
-                                <th className="p-1 text-center">Standar</th>
-                                <th className="p-1 text-center">Total</th>
-                                <th className="p-1 text-center">% Pencapaian</th>
+                                <th className="p-1 pl-1.5">Department (Lanjutan)</th>
+                                <th className="p-1 text-center w-8">MS</th>
+                                <th className="p-1 text-center w-8">US</th>
+                                <th className="p-1 text-center w-9">Total</th>
                               </tr>
                             </thead>
                             <tbody>
-                              {byPosition.map((d) => (
-                                <tr key={d.key} className="border-t">
-                                  <td className="p-1 font-semibold">{d.label}</td>
-                                  <td className="p-1 text-center">{d.threshold} Skill</td>
-                                  <td className="p-1 text-center font-bold">{d.manpower}</td>
-                                  <td className="p-1 text-center text-emerald-600 font-bold">{(d.resultPercent * 100).toFixed(1)}%</td>
-                                </tr>
-                              ))}
+                              {(byDepartment.length > 7 ? byDepartment.slice(7, 12) : byDepartment.slice(0, 5)).map((d, i) => {
+                                const total = d.ms + d.us;
+                                return (
+                                  <tr key={d.label} className={i % 2 === 1 ? 'bg-slate-50/80' : 'bg-white'}>
+                                    <td className="p-0.5 pl-1.5 font-normal text-slate-800 truncate max-w-[140px]">{d.label}</td>
+                                    <td className="p-0.5 text-center text-slate-600">{d.ms}</td>
+                                    <td className="p-0.5 text-center text-slate-600">{d.us}</td>
+                                    <td className="p-0.5 text-center font-normal text-slate-800">{total}</td>
+                                  </tr>
+                                );
+                              })}
                             </tbody>
                           </table>
+                        </div>
+
+                        {/* Rekap per Grade */}
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className="w-2 h-2 bg-[#B8874B] inline-block"></span>
+                            <p className="font-bold text-[#0E2340] text-[9.5px]">Rekap per Grade</p>
+                          </div>
+                          <div className="border border-slate-200 rounded overflow-hidden">
+                            <table className="w-full text-[7.5px] text-left">
+                              <thead className="bg-[#0E2340] text-white">
+                                <tr>
+                                  <th className="p-1 pl-1.5">Grade</th>
+                                  <th className="p-1 text-center w-8">MS</th>
+                                  <th className="p-1 text-center w-8">US</th>
+                                  <th className="p-1 text-center w-9">Total</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {byGrade.slice(0, 8).map((d, i) => {
+                                  const total = d.ms + d.us;
+                                  return (
+                                    <tr key={d.label} className={i % 2 === 1 ? 'bg-slate-50/80' : 'bg-white'}>
+                                      <td className="p-0.5 pl-1.5 font-normal text-slate-800">{d.label}</td>
+                                      <td className="p-0.5 text-center text-slate-600">{d.ms}</td>
+                                      <td className="p-0.5 text-center text-slate-600">{d.us}</td>
+                                      <td className="p-0.5 text-center font-normal text-slate-800">{total}</td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+
+                        {/* Rekap per Job Position */}
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className="w-2 h-2 bg-[#B8874B] inline-block"></span>
+                            <p className="font-bold text-[#0E2340] text-[9.5px]">Rekap per Job Position</p>
+                          </div>
+                          <div className="border border-slate-200 rounded overflow-hidden">
+                            <table className="w-full text-[7px] text-left">
+                              <thead className="bg-[#0E2340] text-white">
+                                <tr>
+                                  <th className="p-1 pl-1.5">Job Position</th>
+                                  <th className="p-1 text-center">Threshold</th>
+                                  <th className="p-1 text-center">Target (%)</th>
+                                  <th className="p-1 text-center">OK</th>
+                                  <th className="p-1 text-center">Not OK</th>
+                                  <th className="p-1 text-center">Manpower</th>
+                                  <th className="p-1 text-center">Result (%)</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {byPosition.map((d, i) => (
+                                  <tr key={d.key} className={i % 2 === 1 ? 'bg-slate-50/80' : 'bg-white'}>
+                                    <td className="p-0.5 pl-1.5 font-medium text-slate-800">{d.label}</td>
+                                    <td className="p-0.5 text-center text-slate-600">{d.threshold}</td>
+                                    <td className="p-0.5 text-center text-slate-600">{(d.target * 100).toFixed(1)}</td>
+                                    <td className="p-0.5 text-center text-slate-600">{d.ok}</td>
+                                    <td className="p-0.5 text-center text-slate-600">{d.notOk}</td>
+                                    <td className="p-0.5 text-center font-medium text-slate-800">{d.manpower}</td>
+                                    <td className="p-0.5 text-center font-medium text-slate-800">{(d.resultPercent * 100).toFixed(1)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
                         </div>
                       </div>
                     )}
 
                     {activePreviewPage === 'page3' && (
-                      <div className="space-y-3 animate-fadeIn">
-                        <p className="font-bold text-[#0E2340] border-b pb-1 text-[11px]">
-                          4. Lembar Pengesahan &amp; Tanda Tangan Elektronik
-                        </p>
-                        <div className="p-3 rounded-lg border border-dashed border-slate-300 bg-slate-50 space-y-2">
-                          <p className="text-[8px] text-slate-500">
-                            Dokumen laporan ini diverifikasi dan diterbitkan secara digital oleh Human Resources Development Dept:
+                      <div className="space-y-3 animate-fadeIn flex flex-col justify-start pt-3">
+                        <div className="self-end w-48 space-y-1 text-right">
+                          <p className="text-[7.5px] text-slate-600">
+                            Mojokerto, {new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}
                           </p>
-                          <div className="pt-2 text-center border-t border-slate-200">
-                            <span className="badge-pill bg-emerald-100 text-emerald-800 text-[8px] px-2 py-0.5 font-bold mb-1 inline-block">
-                              E-SIGN VERIFIED
-                            </span>
-                            <p className="font-bold text-[#0E2340] text-[10px]">{signerName}</p>
-                            <p className="text-[8px] text-slate-500">{signerRole}</p>
+                          <p className="text-[7.5px] text-slate-600">Mengetahui,</p>
+                          <p className="text-[8.5px] font-bold text-[#0E2340]">HR Management</p>
+
+                          {/* Dashed E-Sign Box */}
+                          <div className="p-2.5 rounded-lg border border-dashed border-[#B8874B] bg-white text-left space-y-1.5 shadow-xs my-2">
+                            <div className="flex items-center gap-1.5">
+                              <span className="w-4 h-4 rounded-full bg-[#B8874B] text-white flex items-center justify-center text-[7px] font-bold">
+                                ✓
+                              </span>
+                              <span className="text-[8.5px] font-bold text-[#B8874B]">E-SIGNED</span>
+                            </div>
+                            <div className="text-[6.5px] text-slate-500 leading-tight space-y-0.5">
+                              <p>Ditandatangani elektronik</p>
+                              <p>{new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+                              <p>{new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB</p>
+                            </div>
+                          </div>
+
+                          <div className="text-left pt-1">
+                            <p className="font-bold text-slate-800 text-[8.5px]">( {signerName} )</p>
+                            <p className="text-[7px] text-slate-500">{signerRole}</p>
                           </div>
                         </div>
                       </div>
