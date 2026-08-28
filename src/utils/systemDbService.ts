@@ -407,20 +407,96 @@ export async function fetchUserDatabaseInfo(): Promise<{
  */
 export async function downloadUsersDatabaseBackup(): Promise<boolean> {
   try {
-    const res = await fetch('/api/users/database/export');
-    if (!res.ok) return false;
-    const blob = await res.blob();
+    let jsonText = '';
+    try {
+      const res = await fetch('/api/users/database/export');
+      if (res.ok) {
+        jsonText = await res.text();
+      }
+    } catch (_) {
+      // Server fetch failed, continue to fallback
+    }
+
+    if (!jsonText || jsonText.trim().length === 0) {
+      // Offline/fallback generation from client local data
+      const localUsers = JSON.parse(localStorage.getItem('msm_users_v2') || '[]');
+      const localSession = JSON.parse(localStorage.getItem('msm_session_v2') || 'null');
+      const exportPayload = {
+        version: '2.0',
+        databaseName: 'PT Ajinomoto Indonesia - User Accounts & Authentication Database (Backup)',
+        description: 'Dedicated database backup of system accounts, administrators, and credentials.',
+        lastUpdated: new Date().toISOString(),
+        users: Array.isArray(localUsers) && localUsers.length > 0 ? localUsers : (localSession ? [localSession] : [])
+      };
+      jsonText = JSON.stringify(exportPayload, null, 2);
+    }
+
+    const blob = new Blob([jsonText], { type: 'application/json;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = `ajinomoto_users_db_backup_${new Date().toISOString().slice(0, 10)}.json`;
+    a.style.display = 'none';
     document.body.appendChild(a);
     a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 4000);
     return true;
   } catch (err) {
     console.error('Failed to export users database:', err);
+    return false;
+  }
+}
+
+/**
+ * Trigger download of complete Multi-Skill system database (Employees, Skills, Matrix, Config, and Users)
+ */
+export function downloadFullSystemBackup(employees: any[]): boolean {
+  try {
+    const localUsers = JSON.parse(localStorage.getItem('msm_users_v2') || '[]');
+    const localSession = JSON.parse(localStorage.getItem('msm_session_v2') || 'null');
+    const localConfig = JSON.parse(localStorage.getItem('msm_system_config_v2') || '{}');
+    const localSmtp = JSON.parse(localStorage.getItem('msm_smtp_config_v2') || '{}');
+    const localSupabase = JSON.parse(localStorage.getItem('msm_supabase_config_v1') || '{}');
+
+    const fullDatabasePayload = {
+      system: 'PT Ajinomoto Indonesia - Multi-Skill Monitoring System (Comprehensive Backup)',
+      version: '2.5',
+      exportDate: new Date().toISOString(),
+      factory: 'Mojokerto Plant',
+      stats: {
+        totalEmployees: employees.length,
+        totalUsers: Array.isArray(localUsers) ? localUsers.length : 1,
+        activeExportUser: localSession?.username || 'hr_admin'
+      },
+      employees,
+      users: Array.isArray(localUsers) && localUsers.length > 0 ? localUsers : (localSession ? [localSession] : []),
+      config: localConfig,
+      smtp: localSmtp,
+      cloudSync: {
+        googleSheetUrl: localStorage.getItem('msm_google_sheet_url_v2') || '',
+        hasSupabase: Boolean(localSupabase.url)
+      }
+    };
+
+    const jsonText = JSON.stringify(fullDatabasePayload, null, 2);
+    const blob = new Blob([jsonText], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `ajinomoto_full_system_database_backup_${new Date().toISOString().slice(0, 10)}.json`;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 4000);
+    return true;
+  } catch (err) {
+    console.error('Failed to export full system database:', err);
     return false;
   }
 }

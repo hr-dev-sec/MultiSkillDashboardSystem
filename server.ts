@@ -102,9 +102,9 @@ async function startServer() {
         name: safeUser.name,
         role: safeUser.role,
         department: safeUser.department,
-        email: safeUser.email || 'mahmud.nurdiansyah@ajinomoto.co.id',
-        phone: safeUser.phone || '0812-3456-7890',
-        nik: safeUser.nik || 'AJI-HRD-0104',
+        email: safeUser.email || 'mahmudnurdiansyah4@gmail.com',
+        phone: safeUser.phone || '0819-1932-7912',
+        nik: safeUser.nik || '122108091',
         avatarUrl: safeUser.avatarUrl || '',
         bio: safeUser.bio || 'Administrator Multi-Skill Monitoring & Pengembangan Kompetensi Karyawan PT Ajinomoto Indonesia Mojokerto Factory.',
         token: 'tok_' + Math.random().toString(36).substring(2) + Date.now().toString(36)

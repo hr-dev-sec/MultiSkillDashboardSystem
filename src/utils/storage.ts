@@ -259,9 +259,9 @@ export function checkLogin(username: string, password: string): { success: boole
     name: user.name,
     role: user.role,
     department: user.department,
-    email: user.email || 'mahmud.nurdiansyah@ajinomoto.co.id',
-    phone: user.phone || '0812-3456-7890',
-    nik: user.nik || 'AJI-HRD-0104',
+    email: user.email || 'mahmudnurdiansyah4@gmail.com',
+    phone: user.phone || '0819-1932-7912',
+    nik: user.nik || '122108091',
     avatarUrl: user.avatarUrl || '',
     bio: user.bio || 'Administrator Multi-Skill Monitoring & Pengembangan Kompetensi Karyawan PT Ajinomoto Indonesia Mojokerto Factory.',
     token: 'tok_' + Math.random().toString(36).substring(2) + Date.now().toString(36)

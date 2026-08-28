@@ -19,6 +19,7 @@ import {
   deleteServerUser,
   fetchUserDatabaseInfo,
   downloadUsersDatabaseBackup,
+  downloadFullSystemBackup,
   importUsersDatabase,
   resetUsersDatabase
 } from '../utils/systemDbService';
@@ -288,9 +289,29 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setIsExportingUserDb(false);
     if (success) {
       setUserDbActionAlert({ type: 'success', message: 'File backup database pengguna (users_db.json) berhasil diunduh.' });
-      setTimeout(() => setUserDbActionAlert(null), 4000);
+      setTimeout(() => setUserDbActionAlert(null), 5000);
+      try {
+        confetti({ particleCount: 40, spread: 60, origin: { y: 0.7 } });
+      } catch (_) {}
     } else {
       setUserDbActionAlert({ type: 'error', message: 'Gagal mengunduh file backup database pengguna.' });
+    }
+  };
+
+  const handleBackupFullSystemDb = () => {
+    setUserDbActionAlert(null);
+    const success = downloadFullSystemBackup(employees);
+    if (success) {
+      setUserDbActionAlert({
+        type: 'success',
+        message: `Cadangan Lengkap Sistem (${employees.length} Karyawan, 92 Skill, Akun Pengguna & Konfigurasi) berhasil diunduh.`
+      });
+      setTimeout(() => setUserDbActionAlert(null), 6000);
+      try {
+        confetti({ particleCount: 60, spread: 80, origin: { y: 0.6 } });
+      } catch (_) {}
+    } else {
+      setUserDbActionAlert({ type: 'error', message: 'Gagal membuat file cadangan sistem lengkap.' });
     }
   };
 
@@ -1061,11 +1082,20 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               type="button"
               onClick={handleBackupUserDb}
               disabled={isExportingUserDb}
-              className="px-3 py-2 rounded-xl text-xs font-bold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-750 flex items-center gap-1.5 shadow-xs cursor-pointer transition disabled:opacity-50"
-              title="Unduh cadangan database pengguna (users_db.json)"
+              className="px-3 py-2 rounded-xl text-xs font-bold bg-white dark:bg-slate-800 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-950 flex items-center gap-1.5 shadow-xs cursor-pointer transition disabled:opacity-50"
+              title="Unduh cadangan khusus database pengguna (users_db.json)"
             >
-              <i className={`fa-solid fa-download text-indigo-500 ${isExportingUserDb ? 'animate-bounce' : ''}`}></i>
+              <i className={`fa-solid fa-user-shield text-indigo-500 ${isExportingUserDb ? 'animate-bounce' : ''}`}></i>
               <span>Backup User DB</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleBackupFullSystemDb}
+              className="px-3 py-2 rounded-xl text-xs font-bold bg-white dark:bg-slate-800 border border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950 flex items-center gap-1.5 shadow-xs cursor-pointer transition"
+              title="Unduh cadangan komprehensif seluruh sistem (Karyawan, 92 Skill, Akun Pengguna, Konfigurasi)"
+            >
+              <i className="fa-solid fa-box-archive text-amber-500"></i>
+              <span>Backup Full System DB</span>
             </button>
             <label className="px-3 py-2 rounded-xl text-xs font-bold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-750 flex items-center gap-1.5 shadow-xs cursor-pointer transition">
               <i className={`fa-solid fa-upload text-emerald-500 ${isImportingUserDb ? 'animate-spin' : ''}`}></i>
