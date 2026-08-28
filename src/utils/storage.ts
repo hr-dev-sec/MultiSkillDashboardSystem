@@ -138,24 +138,24 @@ export async function syncSystemFromBackend(): Promise<{ users: UserAccount[]; c
 
       // If active session exists, refresh with latest profile details from server
       const currentSession = getStoredSession();
-      if (currentSession && currentSession.username) {
-        const matchingUser = initData.users.find(
-          (u) => u.username.trim().toLowerCase() === currentSession.username.trim().toLowerCase()
-        );
-        if (matchingUser) {
-          const refreshedSession: UserSession = {
-            ...currentSession,
-            name: matchingUser.name || currentSession.name,
-            role: matchingUser.role || currentSession.role,
-            department: matchingUser.department || currentSession.department,
-            email: matchingUser.email || currentSession.email,
-            phone: matchingUser.phone || currentSession.phone,
-            nik: matchingUser.nik || currentSession.nik,
-            avatarUrl: matchingUser.avatarUrl !== undefined ? matchingUser.avatarUrl : currentSession.avatarUrl,
-            bio: matchingUser.bio !== undefined ? matchingUser.bio : currentSession.bio
-          };
-          saveStoredSession(refreshedSession);
-        }
+      const targetUser = currentSession?.username
+        ? initData.users.find((u) => u.username.trim().toLowerCase() === currentSession.username.trim().toLowerCase())
+        : initData.users[0];
+
+      if (targetUser) {
+        const refreshedSession: UserSession = {
+          username: targetUser.username,
+          name: targetUser.name || 'Mahmud Nurdiansyah',
+          role: targetUser.role || 'HR Development Admin',
+          department: targetUser.department || 'Human Resources Development',
+          email: targetUser.email || 'mahmudnurdiansyah4@gmail.com',
+          phone: targetUser.phone || '0819-1932-7912',
+          nik: targetUser.nik || '122108091',
+          avatarUrl: targetUser.avatarUrl || '',
+          bio: targetUser.bio || 'Administrator Multi-Skill Monitoring & Pengembangan Kompetensi Karyawan PT Ajinomoto Indonesia Mojokerto Factory.',
+          token: currentSession?.token || 'tok_admin_' + Date.now()
+        };
+        saveStoredSession(refreshedSession);
       }
 
       return { users: initData.users, config: initData.config };
@@ -315,21 +315,37 @@ export async function updateUserProfileAsync(
   oldUsername: string,
   updatedData: Partial<UserAccount>
 ): Promise<{ success: boolean; message: string; session?: UserSession; user?: UserAccount }> {
+  const targetUsername = oldUsername?.trim() || getStoredSession()?.username || 'hr_admin';
+  
   try {
-    const serverRes = await updateServerUserProfile(oldUsername, updatedData);
+    const serverRes = await updateServerUserProfile(targetUsername, updatedData);
     if (serverRes.success) {
-      // Update local storage
-      updateUserProfile(oldUsername, updatedData);
-      if (serverRes.session) {
-        saveStoredSession(serverRes.session);
+      // Update local storage as well
+      const localResult = updateUserProfile(targetUsername, updatedData);
+      const finalSession = serverRes.session || localResult.session;
+      if (finalSession) {
+        saveStoredSession(finalSession);
       }
-      return serverRes;
+      return {
+        success: true,
+        message: serverRes.message || 'Profil dan foto pengguna berhasil diperbarui di database.',
+        session: finalSession,
+        user: serverRes.user
+      };
     }
-    return serverRes;
   } catch (err) {
-    // Fallback to local
-    return updateUserProfile(oldUsername, updatedData);
+    console.warn('Server profile update error, continuing with local storage fallback:', err);
   }
+
+  // Fallback to local storage update
+  const localResult = updateUserProfile(targetUsername, updatedData);
+  return {
+    success: localResult.success,
+    message: localResult.success
+      ? 'Profil dan foto pengguna berhasil diperbarui.'
+      : (localResult.message || 'Gagal memperbarui profil pengguna.'),
+    session: localResult.session
+  };
 }
 
 export function updateUserProfile(
@@ -337,14 +353,55 @@ export function updateUserProfile(
   updatedData: Partial<UserAccount>
 ): { success: boolean; message: string; session?: UserSession } {
   const users = getStoredUsers();
-  const idx = users.findIndex((u) => u.username.trim().toLowerCase() === oldUsername.trim().toLowerCase());
+  const cleanOld = (oldUsername || '').trim().toLowerCase();
+  let idx = users.findIndex((u) => u.username.trim().toLowerCase() === cleanOld);
 
   if (idx === -1) {
-    return { success: false, message: 'Akun admin tidak ditemukan di database sistem.' };
+    if (updatedData.email) {
+      idx = users.findIndex((u) => u.email?.trim().toLowerCase() === updatedData.email?.trim().toLowerCase());
+    }
+    if (idx === -1 && updatedData.nik) {
+      idx = users.findIndex((u) => u.nik?.trim().toLowerCase() === updatedData.nik?.trim().toLowerCase());
+    }
+    if (idx === -1 && users.length > 0) {
+      const hrIdx = users.findIndex((u) => u.username.toLowerCase() === 'hr_admin');
+      idx = hrIdx !== -1 ? hrIdx : 0;
+    }
+  }
+
+  if (idx === -1) {
+    const newUser: UserAccount = {
+      username: updatedData.username?.trim() || 'hr_admin',
+      password: 'password123',
+      name: updatedData.name?.trim() || 'Mahmud Nurdiansyah',
+      role: updatedData.role?.trim() || 'HR Development Admin',
+      department: updatedData.department?.trim() || 'Human Resources Development',
+      email: updatedData.email?.trim() || 'mahmudnurdiansyah4@gmail.com',
+      phone: updatedData.phone?.trim() || '0819-1932-7912',
+      nik: updatedData.nik?.trim() || '122108091',
+      avatarUrl: updatedData.avatarUrl || '',
+      bio: updatedData.bio || 'Administrator Multi-Skill Monitoring & Pengembangan Kompetensi Karyawan PT Ajinomoto Indonesia Mojokerto Factory.'
+    };
+    users.push(newUser);
+    saveStoredUsers(users);
+    const session: UserSession = {
+      username: newUser.username,
+      name: newUser.name,
+      role: newUser.role,
+      department: newUser.department,
+      email: newUser.email,
+      phone: newUser.phone,
+      nik: newUser.nik,
+      avatarUrl: newUser.avatarUrl,
+      bio: newUser.bio,
+      token: 'tok_admin_' + Date.now()
+    };
+    saveStoredSession(session);
+    return { success: true, message: 'Profil pengguna berhasil diperbarui.', session };
   }
 
   // If changing username, ensure uniqueness
-  if (updatedData.username && updatedData.username.trim().toLowerCase() !== oldUsername.trim().toLowerCase()) {
+  if (updatedData.username && updatedData.username.trim().toLowerCase() !== users[idx].username.trim().toLowerCase()) {
     const isTaken = users.some(
       (u, i) => i !== idx && u.username.trim().toLowerCase() === updatedData.username!.trim().toLowerCase()
     );
@@ -372,7 +429,7 @@ export function updateUserProfile(
   saveStoredUsers(users);
 
   // Trigger server sync in background if available
-  updateServerUserProfile(oldUsername, updatedData).catch(() => {});
+  updateServerUserProfile(oldUsername || mergedUser.username, updatedData).catch(() => {});
 
   // Update active session
   const currentSession = getStoredSession();

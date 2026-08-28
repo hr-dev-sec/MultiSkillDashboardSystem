@@ -67,13 +67,20 @@ export default function App() {
   // User session
   const [currentUser, setCurrentUser] = useState<UserSession>(() => {
     const existing = getSession();
-    if (existing) return existing;
-    return {
-      username: '',
-      name: '',
-      role: '',
-      department: ''
+    if (existing && existing.username) return existing;
+    const defaultSession: UserSession = {
+      username: 'hr_admin',
+      name: 'Mahmud Nurdiansyah',
+      role: 'HR Development Admin',
+      department: 'Human Resources Development',
+      email: 'mahmudnurdiansyah4@gmail.com',
+      phone: '0819-1932-7912',
+      nik: '122108091',
+      avatarUrl: '',
+      bio: 'Administrator Multi-Skill Monitoring & Pengembangan Kompetensi Karyawan PT Ajinomoto Indonesia Mojokerto Factory.'
     };
+    saveSession(defaultSession);
+    return defaultSession;
   });
 
   // Employees Database
@@ -558,7 +565,10 @@ export default function App() {
                 onToggleDarkMode={handleToggleDarkMode}
                 onRefreshData={(newEmployees) => setEmployees(newEmployees)}
                 onOpenImportModal={() => setIsImportModalOpen(true)}
-                onUpdateCurrentUser={(updatedUser) => setCurrentUser(updatedUser)}
+                onUpdateCurrentUser={(updatedUser) => {
+                  saveSession(updatedUser);
+                  setCurrentUser(updatedUser);
+                }}
               />
             )}
           </div>

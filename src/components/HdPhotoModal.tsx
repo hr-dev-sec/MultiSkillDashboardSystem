@@ -90,9 +90,6 @@ export const HdPhotoModal: React.FC<HdPhotoModalProps> = ({
               src={imageUrl}
               alt={userName}
               className="max-h-[50vh] max-w-full object-contain rounded-2xl shadow-2xl ring-4 ring-white/10"
-              style={{
-                imageRendering: '-webkit-optimize-contrast'
-              }}
             />
           </div>
 

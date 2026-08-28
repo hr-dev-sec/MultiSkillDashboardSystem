@@ -1,6 +1,6 @@
 {
   "version": "2.3",
-  "lastUpdated": "2026-08-27T10:12:38.360Z",
+  "lastUpdated": "2026-08-27T10:19:01.207Z",
   "users": [
     {
       "username": "hr_admin",
@@ -8,13 +8,13 @@
       "name": "Mahmud Nurdiansyah",
       "role": "HR Development Admin",
       "department": "Human Resources Development",
-      "email": "mahmud.nurdiansyah@ajinomoto.co.id",
-      "phone": "0812-3456-7890",
-      "nik": "AJI-HRD-0104",
-      "avatarUrl": "",
+      "email": "mahmudnurdiansyah4@gmail.com",
+      "phone": "0819-1932-7912",
+      "nik": "122108091",
+      "avatarUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
       "bio": "Administrator Multi-Skill Monitoring & Pengembangan Kompetensi Karyawan PT Ajinomoto Indonesia Mojokerto Factory.",
       "createdAt": "2026-01-01T00:00:00.000Z",
-      "updatedAt": "2026-08-27T09:55:09.940Z",
+      "updatedAt": "2026-08-27T10:19:01.207Z",
       "lastLogin": "2026-08-27T10:12:38.360Z"
     }
   ],
@@ -45,6 +45,14 @@
     "updatedAt": "2026-08-27T09:55:09.940Z"
   },
   "activityLogs": [
+    {
+      "id": "ACT-1787825941207-0czc7",
+      "timestamp": "2026-08-27T10:19:01.207Z",
+      "username": "hr_admin",
+      "action": "PHOTO_UPDATED",
+      "details": "Memperbarui data profil: Mahmud Nurdiansyah (HR Development Admin - Human Resources Development) beserta foto profil",
+      "ip": "127.0.0.1"
+    },
     {
       "id": "ACT-1787825558360-t2z5f",
       "timestamp": "2026-08-27T10:12:38.360Z",

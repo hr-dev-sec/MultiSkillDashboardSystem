@@ -21,15 +21,20 @@ import {
   getActivityLogs,
   addActivityLog,
   getEmailLogs,
-  addEmailLog
+  addEmailLog,
+  exportUsersDatabaseJson,
+  importUsersDatabaseJson,
+  resetUsersDatabaseToDefault
 } from './server/systemDb.js';
+import { initUsersDatabase, getUsersDatabase } from './server/usersDb.js';
 
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Initialize System Database on startup
+// Initialize Dedicated Users Database & System Database on startup
+initUsersDatabase();
 initSystemDatabase();
 
 async function startServer() {
@@ -270,6 +275,73 @@ async function startServer() {
       res.json(result);
     } catch (err: any) {
       res.status(500).json({ success: false, message: 'Gagal menghapus akun pengguna.' });
+    }
+  });
+
+  // =========================================================================
+  // API ROUTE: DEDICATED USER DATABASE TOOLS (EXPORT / IMPORT / INFO / RESET)
+  // =========================================================================
+  app.get('/api/users/database/info', (req, res) => {
+    try {
+      const userDb = getUsersDatabase();
+      res.json({
+        success: true,
+        databaseName: userDb.databaseName,
+        fileName: 'users_db.json',
+        storageType: 'Dedicated Isolated JSON Database',
+        version: userDb.version,
+        totalUsers: userDb.users.length,
+        lastUpdated: userDb.lastUpdated,
+        usersSummary: userDb.users.map((u) => ({
+          username: u.username,
+          name: u.name,
+          role: u.role,
+          department: u.department,
+          hasAvatar: Boolean(u.avatarUrl),
+          lastLogin: u.lastLogin || null
+        }))
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: 'Gagal membaca metadata database pengguna.' });
+    }
+  });
+
+  app.get('/api/users/database/export', (req, res) => {
+    try {
+      const jsonStr = exportUsersDatabaseJson();
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Content-Disposition', `attachment; filename="ajinomoto_users_database_${Date.now()}.json"`);
+      res.send(jsonStr);
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: 'Gagal mengekspor database pengguna.' });
+    }
+  });
+
+  app.post('/api/users/database/import', (req, res) => {
+    try {
+      const { jsonContent, operatorUsername } = req.body || {};
+      if (!jsonContent) {
+        return res.status(400).json({ success: false, message: 'Konten JSON database pengguna wajib disertakan.' });
+      }
+
+      const clientIp = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress;
+      const result = importUsersDatabaseJson(jsonContent, operatorUsername || 'admin', clientIp);
+      if (!result.success) {
+        return res.status(400).json(result);
+      }
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: 'Gagal mengimpor database pengguna.' });
+    }
+  });
+
+  app.post('/api/users/database/reset', (req, res) => {
+    try {
+      const clientIp = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress;
+      const result = resetUsersDatabaseToDefault(req.body.operatorUsername || 'admin', clientIp);
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: 'Gagal mereset database pengguna.' });
     }
   });
 

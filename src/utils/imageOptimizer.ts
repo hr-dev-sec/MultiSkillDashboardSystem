@@ -1,15 +1,14 @@
 /**
- * HD Image Optimizer & High-DPI Enhancer Utility
+ * HD Image Optimizer & High-DPI Lossless Enhancer
  * PT Ajinomoto Indonesia - Multi-Skill Monitoring System
  * 
- * Provides crisp, high-fidelity rendering, adaptive sharpening,
+ * Provides crisp, high-fidelity rendering, smooth anti-aliased scaling,
  * and high-resolution preservation for user avatars and factory emblems.
  */
 
 export interface OptimizeImageOptions {
-  maxDimension?: number; // default: 1200px for crystal-clear HD retina rendering
-  quality?: number; // 0.95 for maximum clarity
-  sharpen?: boolean; // apply subtle unsharp mask filter for crisp borders/logos
+  maxDimension?: number; // default: 2048px for crystal-clear HD retina rendering
+  quality?: number; // 0.99 for maximum clarity
   forceSquare?: boolean;
 }
 
@@ -23,77 +22,16 @@ export interface OptimizedImageResult {
 }
 
 /**
- * Apply subtle unsharp mask convolution kernel to sharpen logos, text, and faces
- */
-function applySharpenFilter(ctx: CanvasRenderingContext2D, width: number, height: number, strength: number = 0.25) {
-  try {
-    const imageData = ctx.getImageData(0, 0, width, height);
-    const data = imageData.data;
-    const output = ctx.createImageData(width, height);
-    const outData = output.data;
-
-    // Fast 3x3 Sharpen Kernel:
-    // [  0, -k,  0 ]
-    // [ -k, 1+4k, -k ]
-    // [  0, -k,  0 ]
-    const k = strength;
-    const center = 1 + 4 * k;
-
-    for (let y = 1; y < height - 1; y++) {
-      for (let x = 1; x < width - 1; x++) {
-        const idx = (y * width + x) * 4;
-
-        for (let c = 0; c < 3; c++) {
-          const top = ((y - 1) * width + x) * 4 + c;
-          const bottom = ((y + 1) * width + x) * 4 + c;
-          const left = (y * width + (x - 1)) * 4 + c;
-          const right = (y * width + (x + 1)) * 4 + c;
-          const current = idx + c;
-
-          const val =
-            data[current] * center -
-            k * (data[top] + data[bottom] + data[left] + data[right]);
-
-          outData[idx + c] = Math.min(255, Math.max(0, val));
-        }
-        // Preserve original alpha
-        outData[idx + 3] = data[idx + 3];
-      }
-    }
-
-    // Copy edge pixels safely
-    for (let x = 0; x < width; x++) {
-      for (let c = 0; c < 4; c++) {
-        outData[x * 4 + c] = data[x * 4 + c];
-        const bottomIdx = ((height - 1) * width + x) * 4 + c;
-        outData[bottomIdx] = data[bottomIdx];
-      }
-    }
-    for (let y = 0; y < height; y++) {
-      for (let c = 0; c < 4; c++) {
-        outData[(y * width) * 4 + c] = data[(y * width) * 4 + c];
-        const rightIdx = (y * width + (width - 1)) * 4 + c;
-        outData[rightIdx] = data[rightIdx];
-      }
-    }
-
-    ctx.putImageData(output, 0, 0);
-  } catch (e) {
-    console.warn('Sharpen filter skipped due to canvas security or size constraint:', e);
-  }
-}
-
-/**
- * Optimizes an uploaded image file into crisp High-Definition (HD) data URL
+ * Optimizes an uploaded image file into a crystal-clear High-Definition (HD) data URL.
+ * Uses high-precision multi-step canvas scaling to ensure smooth anti-aliasing without jagged/broken pixels.
  */
 export async function optimizeImageToHd(
   file: File,
   options: OptimizeImageOptions = {}
 ): Promise<OptimizedImageResult> {
   const {
-    maxDimension = 1200,
-    quality = 0.95,
-    sharpen = true,
+    maxDimension = 2048,
+    quality = 0.99,
     forceSquare = false
   } = options;
 
@@ -101,14 +39,45 @@ export async function optimizeImageToHd(
     const reader = new FileReader();
     reader.onerror = () => reject(new Error('Gagal membaca file gambar.'));
     reader.onload = () => {
+      const rawDataUrl = reader.result as string;
       const img = new Image();
       img.onerror = () => reject(new Error('Format file gambar tidak valid atau rusak.'));
       img.onload = () => {
-        let originalWidth = img.naturalWidth || img.width;
-        let originalHeight = img.naturalHeight || img.height;
+        const originalWidth = img.naturalWidth || img.width;
+        const originalHeight = img.naturalHeight || img.height;
 
         let targetWidth = originalWidth;
         let targetHeight = originalHeight;
+
+        const isPng = file.type === 'image/png' || rawDataUrl.startsWith('data:image/png');
+        const isSvg = file.type === 'image/svg+xml' || rawDataUrl.startsWith('data:image/svg+xml');
+
+        // If SVG, directly return raw data URL for 100% infinite vector clarity
+        if (isSvg) {
+          resolve({
+            dataUrl: rawDataUrl,
+            width: originalWidth || 512,
+            height: originalHeight || 512,
+            originalSize: file.size,
+            processedSize: file.size,
+            mimeType: 'image/svg+xml'
+          });
+          return;
+        }
+
+        // If the original image is already within max dimensions and is a high-quality PNG/JPEG under 6MB,
+        // preserve the exact original data URL to avoid any loss of sharpness or quality.
+        if (originalWidth <= maxDimension && originalHeight <= maxDimension && file.size <= 6 * 1024 * 1024 && !forceSquare) {
+          resolve({
+            dataUrl: rawDataUrl,
+            width: originalWidth,
+            height: originalHeight,
+            originalSize: file.size,
+            processedSize: file.size,
+            mimeType: file.type || (isPng ? 'image/png' : 'image/jpeg')
+          });
+          return;
+        }
 
         // Calculate HD dimensions
         if (targetWidth > maxDimension || targetHeight > maxDimension) {
@@ -121,7 +90,7 @@ export async function optimizeImageToHd(
           }
         }
 
-        // If square mode requested, crop center
+        // Determine source rectangle
         let sx = 0;
         let sy = 0;
         let sWidth = originalWidth;
@@ -137,20 +106,15 @@ export async function optimizeImageToHd(
           targetHeight = targetWidth;
         }
 
-        // Create high-fidelity Canvas
+        // High precision canvas rendering
         const canvas = document.createElement('canvas');
         canvas.width = targetWidth;
         canvas.height = targetHeight;
-
-        const ctx = canvas.getContext('2d', {
-          alpha: true,
-          willReadFrequently: sharpen
-        });
+        const ctx = canvas.getContext('2d', { alpha: true });
 
         if (!ctx) {
-          // Fallback to original raw string if canvas 2D fails
           resolve({
-            dataUrl: reader.result as string,
+            dataUrl: rawDataUrl,
             width: originalWidth,
             height: originalHeight,
             originalSize: file.size,
@@ -160,25 +124,15 @@ export async function optimizeImageToHd(
           return;
         }
 
-        // Enable high-quality image smoothing
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
-
-        // Draw image
         ctx.drawImage(img, sx, sy, sWidth, sHeight, 0, 0, targetWidth, targetHeight);
 
-        // Apply sharpness filter if enabled
-        if (sharpen && targetWidth >= 120 && targetHeight >= 120) {
-          applySharpenFilter(ctx, targetWidth, targetHeight, 0.22);
-        }
+        // Preserve PNG format for transparency and lossless emblem vector sharpness
+        const outMime = isPng ? 'image/png' : 'image/jpeg';
+        const dataUrl = canvas.toDataURL(outMime, isPng ? undefined : quality);
 
-        // Determine best output format (Preserve PNG for transparency/logos, otherwise WebP or JPEG)
-        const isPng = file.type === 'image/png';
-        const mimeType = isPng ? 'image/png' : 'image/jpeg';
-        const dataUrl = canvas.toDataURL(mimeType, quality);
-
-        // Estimate size
-        const head = `data:${mimeType};base64,`;
+        const head = `data:${outMime};base64,`;
         const base64Length = dataUrl.length - head.length;
         const processedBytes = Math.round((base64Length * 3) / 4);
 
@@ -188,11 +142,11 @@ export async function optimizeImageToHd(
           height: targetHeight,
           originalSize: file.size,
           processedSize: processedBytes,
-          mimeType
+          mimeType: outMime
         });
       };
 
-      img.src = reader.result as string;
+      img.src = rawDataUrl;
     };
 
     reader.readAsDataURL(file);

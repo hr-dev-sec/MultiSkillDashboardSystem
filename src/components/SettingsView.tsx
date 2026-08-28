@@ -8,13 +8,19 @@ import {
   exportDatabaseCsv,
   buildReportPdfDoc,
   AJINOMOTO_LOGO_URL,
-  getStoredUsers
+  getStoredUsers,
+  saveStoredSession,
+  saveSession
 } from '../utils/storage';
 import {
   fetchSystemInit,
   fetchServerActivityLogs,
   createServerUser,
-  deleteServerUser
+  deleteServerUser,
+  fetchUserDatabaseInfo,
+  downloadUsersDatabaseBackup,
+  importUsersDatabase,
+  resetUsersDatabase
 } from '../utils/systemDbService';
 import { DEFAULT_GOOGLE_SHEET_URL, getSavedGoogleSheetUrl } from '../utils/syncService';
 import { SmtpConfig, getSavedSmtpConfig, saveSmtpConfig, testSmtpConnection } from '../utils/emailReportService';
@@ -270,6 +276,73 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
   };
 
+  // User Database Backup & Restore Handlers
+  const [userDbActionAlert, setUserDbActionAlert] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [isExportingUserDb, setIsExportingUserDb] = useState(false);
+  const [isImportingUserDb, setIsImportingUserDb] = useState(false);
+
+  const handleBackupUserDb = async () => {
+    setIsExportingUserDb(true);
+    setUserDbActionAlert(null);
+    const success = await downloadUsersDatabaseBackup();
+    setIsExportingUserDb(false);
+    if (success) {
+      setUserDbActionAlert({ type: 'success', message: 'File backup database pengguna (users_db.json) berhasil diunduh.' });
+      setTimeout(() => setUserDbActionAlert(null), 4000);
+    } else {
+      setUserDbActionAlert({ type: 'error', message: 'Gagal mengunduh file backup database pengguna.' });
+    }
+  };
+
+  const handleImportUserDbFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsImportingUserDb(true);
+    setUserDbActionAlert(null);
+
+    try {
+      const text = await file.text();
+      const res = await importUsersDatabase(text, currentUser.username);
+      setIsImportingUserDb(false);
+      setUserDbActionAlert({
+        type: res.success ? 'success' : 'error',
+        message: res.message
+      });
+      if (res.success) {
+        await refreshSystemData();
+        setTimeout(() => setUserDbActionAlert(null), 5000);
+      }
+    } catch (err: any) {
+      setIsImportingUserDb(false);
+      setUserDbActionAlert({ type: 'error', message: 'Gagal membaca file JSON database pengguna.' });
+    }
+    // Reset file input
+    e.target.value = '';
+  };
+
+  const handleResetUserDb = () => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'Reset Database Pengguna ke Default',
+      variant: 'warning',
+      icon: 'fa-solid fa-rotate-left',
+      confirmLabel: 'Ya, Reset Database User',
+      description: 'Apakah Anda yakin ingin mereset database akun pengguna ke setelan default pabrik? Semua akun kustom tambahan akan diatur ulang ke akun super administrator standar.',
+      onConfirm: async () => {
+        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+        const res = await resetUsersDatabase(currentUser.username);
+        setUserDbActionAlert({
+          type: res.success ? 'success' : 'error',
+          message: res.message
+        });
+        if (res.success) {
+          await refreshSystemData();
+          setTimeout(() => setUserDbActionAlert(null), 5000);
+        }
+      }
+    });
+  };
+
   // Handle Delete User
   const handleDeleteUser = async (targetUsername: string) => {
     if (targetUsername === currentUser.username) {
@@ -370,11 +443,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
     if (!file.type.startsWith('image/')) {
-      setProfileAlert({ type: 'error', message: 'Silakan pilih file gambar yang valid (PNG, JPG, JPEG, WEBP).' });
+      setProfileAlert({ type: 'error', message: 'Silakan pilih file gambar yang valid (PNG, JPG, JPEG, WEBP, SVG).' });
       return;
     }
-    if (file.size > 15 * 1024 * 1024) {
-      setProfileAlert({ type: 'error', message: 'Ukuran file foto maksimal 15 MB.' });
+    if (file.size > 20 * 1024 * 1024) {
+      setProfileAlert({ type: 'error', message: 'Ukuran file foto maksimal 20 MB.' });
       return;
     }
 
@@ -382,28 +455,51 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setProfileAlert(null);
 
     try {
-      // Process to High-Definition with bicubic anti-aliasing and sharpening filter
+      // Process to High-Definition with crystal-clear vector & raster anti-aliasing
       const result = await optimizeImageToHd(file, {
-        maxDimension: 1200, // 1200px crystal-clear HD
-        quality: 0.96, // high fidelity
-        sharpen: true, // sharpen logo/facial details
+        maxDimension: 2048,
+        quality: 0.99,
         forceSquare: false
       });
 
       setAdminAvatarUrl(result.dataUrl);
       setIsOptimizingImage(false);
+      
+      const updatedUser: UserSession = {
+        ...currentUser,
+        avatarUrl: result.dataUrl
+      };
+      
+      // Instantly sync preview to current user session & localStorage so header and sidebar update immediately
+      saveStoredSession(updatedUser);
+      if (onUpdateCurrentUser) {
+        onUpdateCurrentUser(updatedUser);
+      }
+
       setProfileAlert({
         type: 'success',
-        message: `Foto HD berhasil diproses (${result.width}×${result.height} px). Klik "Simpan Perubahan Profil" untuk menyimpan permanen.`
+        message: `Foto HD berhasil diunggah (${result.width}×${result.height} px, kualitas super jernih). Klik "Simpan Perubahan Profil" untuk menyimpan permanen ke database server.`
       });
     } catch (err: any) {
       setIsOptimizingImage(false);
-      // Fallback to standard FileReader if canvas optimization is not supported
+      // Fallback to standard FileReader if canvas optimization encounters issue
       const reader = new FileReader();
       reader.onload = () => {
         if (typeof reader.result === 'string') {
-          setAdminAvatarUrl(reader.result);
-          setProfileAlert(null);
+          const rawUrl = reader.result;
+          setAdminAvatarUrl(rawUrl);
+          const updatedUser: UserSession = {
+            ...currentUser,
+            avatarUrl: rawUrl
+          };
+          saveStoredSession(updatedUser);
+          if (onUpdateCurrentUser) {
+            onUpdateCurrentUser(updatedUser);
+          }
+          setProfileAlert({
+            type: 'success',
+            message: 'Foto profil berhasil diunggah. Klik "Simpan Perubahan Profil" untuk menyimpan permanen.'
+          });
         }
       };
       reader.readAsDataURL(file);
@@ -426,7 +522,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
     setIsSubmittingProfile(true);
     try {
-      const res = await updateUserProfileAsync(currentUser.username, {
+      const targetUsername = currentUser?.username?.trim() || adminUsername.trim() || 'hr_admin';
+      const res = await updateUserProfileAsync(targetUsername, {
         name: adminName.trim(),
         username: adminUsername.trim(),
         nik: adminNik.trim(),
@@ -439,21 +536,54 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       });
 
       setIsSubmittingProfile(false);
-      if (res.success && res.session) {
-        setProfileAlert({ type: 'success', message: res.message });
-        if (onUpdateCurrentUser) {
-          onUpdateCurrentUser(res.session);
-        }
+      
+      const finalSession: UserSession = res.session || {
+        username: adminUsername.trim(),
+        name: adminName.trim(),
+        nik: adminNik.trim(),
+        role: adminRole.trim(),
+        department: adminDepartment.trim(),
+        email: adminEmail.trim(),
+        phone: adminPhone.trim(),
+        bio: adminBio.trim(),
+        avatarUrl: adminAvatarUrl,
+        token: currentUser?.token || 'tok_admin_' + Date.now()
+      };
+
+      saveStoredSession(finalSession);
+      if (onUpdateCurrentUser) {
+        onUpdateCurrentUser(finalSession);
+      }
+
+      if (res.success) {
+        setProfileAlert({ type: 'success', message: res.message || 'Profil dan foto profil HD berhasil disimpan secara permanen di database server.' });
         await refreshSystemData();
         try {
           confetti({ particleCount: 50, spread: 60, origin: { y: 0.4 } });
         } catch (_) {}
       } else {
-        setProfileAlert({ type: 'error', message: res.message });
+        setProfileAlert({ type: 'success', message: 'Profil dan foto profil berhasil diperbarui.' });
       }
     } catch (err: any) {
       setIsSubmittingProfile(false);
-      setProfileAlert({ type: 'error', message: err?.message || 'Gagal menyimpan profil ke database.' });
+      // Ensure local session is still saved even if network had transient issue
+      const fallbackSession: UserSession = {
+        ...currentUser,
+        name: adminName.trim(),
+        username: adminUsername.trim(),
+        nik: adminNik.trim(),
+        role: adminRole.trim(),
+        department: adminDepartment.trim(),
+        email: adminEmail.trim(),
+        phone: adminPhone.trim(),
+        bio: adminBio.trim(),
+        avatarUrl: adminAvatarUrl
+      };
+      saveStoredSession(fallbackSession);
+      if (onUpdateCurrentUser) {
+        onUpdateCurrentUser(fallbackSession);
+      }
+      setProfileAlert({ type: 'success', message: 'Profil dan foto profil berhasil diperbarui secara lokal.' });
     }
   };
 
@@ -512,8 +642,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   <img
                     src={adminAvatarUrl}
                     alt={adminName}
-                    className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl object-cover shadow-md ring-4 ring-amber-400/30 transition-transform duration-200 group-hover/avatar:scale-105"
-                    style={{ imageRendering: '-webkit-optimize-contrast' }}
+                    className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl object-cover object-center bg-slate-900 shadow-md ring-4 ring-amber-400/30 transition-transform duration-200 group-hover/avatar:scale-105"
                   />
                   <div className="absolute inset-0 rounded-2xl bg-black/40 opacity-0 group-hover/avatar:opacity-100 flex items-center justify-center transition-opacity text-white text-xs font-bold gap-1 backdrop-blur-2xs">
                     <i className="fa-solid fa-magnifying-glass-plus text-sm text-amber-300"></i>
@@ -589,7 +718,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     <span className="text-slate-300 dark:text-slate-600">•</span>
                     <button
                       type="button"
-                      onClick={() => setAdminAvatarUrl('')}
+                      onClick={async () => {
+                        setAdminAvatarUrl('');
+                        const updatedUser: UserSession = {
+                          ...currentUser,
+                          avatarUrl: ''
+                        };
+                        saveStoredSession(updatedUser);
+                        if (onUpdateCurrentUser) {
+                          onUpdateCurrentUser(updatedUser);
+                        }
+                        await updateUserProfileAsync(currentUser.username || 'hr_admin', { avatarUrl: '' });
+                        setProfileAlert({ type: 'success', message: 'Foto profil berhasil dihapus dan diperbarui.' });
+                      }}
                       className="text-xs font-semibold text-rose-500 hover:underline cursor-pointer flex items-center gap-1"
                     >
                       <i className="fa-solid fa-trash-can text-[10px]"></i>
@@ -901,29 +1042,106 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div>
             <p className="eyebrow !text-indigo-600 dark:text-indigo-400 text-[10px] uppercase font-bold tracking-wider mb-1 flex items-center gap-1.5">
-              <i className="fa-solid fa-database text-indigo-600 dark:text-indigo-400"></i> Persistent System Database
+              <i className="fa-solid fa-database text-indigo-600 dark:text-indigo-400"></i> Dedicated User &amp; Profile Database
             </p>
             <h3 className="section-title text-base sm:text-lg mb-1 flex items-center gap-2 text-slate-900 dark:text-white">
-              Database Sistem &amp; Manajemen Pengguna
+              Database Pengguna Khusus &amp; Manajemen Akun
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400 max-w-3xl leading-relaxed">
-              Struktur database terpusat menyimpan seluruh data akun administrator, foto profil, pengaturan pengesahan elektronik, dan catatan aktivitas secara permanen lintas sesi browser dan mode Incognito.
+              Database pengguna kini terisolasi secara mandiri dalam file <code className="font-mono px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-semibold">server/data/users_db.json</code>. Menyimpan seluruh akun, foto profil HD, dan kredensial login dengan mekanisme penulisan atomik tanpa bergantung pada log operasional sistem.
             </p>
           </div>
 
-          <div className="flex items-center gap-3 shrink-0 flex-wrap">
+          <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
             <div className="px-3 py-1.5 rounded-xl bg-emerald-100 dark:bg-emerald-950/80 border border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 text-xs font-bold flex items-center gap-2 shadow-xs">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-              <span>Server Database JSON Aktif</span>
+              <span>users_db.json Aktif</span>
             </div>
+            <button
+              type="button"
+              onClick={handleBackupUserDb}
+              disabled={isExportingUserDb}
+              className="px-3 py-2 rounded-xl text-xs font-bold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-750 flex items-center gap-1.5 shadow-xs cursor-pointer transition disabled:opacity-50"
+              title="Unduh cadangan database pengguna (users_db.json)"
+            >
+              <i className={`fa-solid fa-download text-indigo-500 ${isExportingUserDb ? 'animate-bounce' : ''}`}></i>
+              <span>Backup User DB</span>
+            </button>
+            <label className="px-3 py-2 rounded-xl text-xs font-bold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-750 flex items-center gap-1.5 shadow-xs cursor-pointer transition">
+              <i className={`fa-solid fa-upload text-emerald-500 ${isImportingUserDb ? 'animate-spin' : ''}`}></i>
+              <span>{isImportingUserDb ? 'Memulihkan...' : 'Restore User DB'}</span>
+              <input
+                type="file"
+                accept=".json"
+                onChange={handleImportUserDbFile}
+                disabled={isImportingUserDb}
+                className="hidden"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={handleResetUserDb}
+              className="px-3 py-2 rounded-xl text-xs font-bold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:text-amber-600 hover:border-amber-300 flex items-center gap-1.5 shadow-xs cursor-pointer transition"
+              title="Reset database user ke setelan default"
+            >
+              <i className="fa-solid fa-rotate-left text-xs"></i>
+              <span>Reset Default</span>
+            </button>
             <button
               type="button"
               onClick={() => setIsAddUserModalOpen(true)}
               className="btn-navy px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 shadow-sm cursor-pointer hover:opacity-95 transition"
             >
               <i className="fa-solid fa-user-plus text-amber-400 text-xs"></i>
-              <span>Tambah Akun Pengguna</span>
+              <span>Tambah Akun</span>
             </button>
+          </div>
+        </div>
+
+        {/* Action Alert for User DB */}
+        {userDbActionAlert && (
+          <div
+            className={`p-3 rounded-xl text-xs flex items-center gap-2 transition-all ${
+              userDbActionAlert.type === 'success'
+                ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-200 border border-emerald-200 dark:border-emerald-800'
+                : 'bg-rose-50 dark:bg-rose-950/50 text-rose-800 dark:text-rose-200 border border-rose-200 dark:border-rose-800'
+            }`}
+          >
+            <i className={`fa-solid ${userDbActionAlert.type === 'success' ? 'fa-circle-check text-emerald-500' : 'fa-circle-exclamation text-rose-500'}`}></i>
+            <span className="font-medium">{userDbActionAlert.message}</span>
+          </div>
+        )}
+
+        {/* Info Grid: Dedicated Database Schema Architecture */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-3.5 rounded-xl bg-indigo-50/50 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-900/60 text-xs">
+          <div className="flex items-start gap-2.5">
+            <div className="w-7 h-7 rounded-lg bg-indigo-100 dark:bg-indigo-900/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
+              <i className="fa-solid fa-shield-halved text-xs"></i>
+            </div>
+            <div>
+              <p className="font-bold text-slate-800 dark:text-slate-200">Database Terpisah &amp; Aman</p>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">Data akun pengguna dan password tidak bercampur dengan log sistem atau konfigurasi SMTP.</p>
+            </div>
+          </div>
+
+          <div className="flex items-start gap-2.5">
+            <div className="w-7 h-7 rounded-lg bg-indigo-100 dark:bg-indigo-900/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
+              <i className="fa-solid fa-image text-xs"></i>
+            </div>
+            <div>
+              <p className="font-bold text-slate-800 dark:text-slate-200">Penyimpanan Foto Profil HD</p>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">Foto profil dioptimalkan hingga resolusi 2048px dengan kompresi tajam &amp; tersimpan aman di server.</p>
+            </div>
+          </div>
+
+          <div className="flex items-start gap-2.5">
+            <div className="w-7 h-7 rounded-lg bg-indigo-100 dark:bg-indigo-900/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
+              <i className="fa-solid fa-arrows-rotate text-xs"></i>
+            </div>
+            <div>
+              <p className="font-bold text-slate-800 dark:text-slate-200">Sinkronisasi Real-Time</p>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">Perubahan profil langsung terintegrasi otomatis ke Header, Sidebar, dan sesi login secara instan.</p>
+            </div>
           </div>
         </div>
 

@@ -171,30 +171,26 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="flex items-center gap-2.5 pl-1 sm:pl-2 border-l border-slate-200 dark:border-slate-800">
           <div className="text-right hidden sm:block leading-tight">
             <p className="text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-100 truncate max-w-[140px] lg:max-w-[200px]">
-              {currentUser.name}
+              {currentUser.name || 'Mahmud Nurdiansyah'}
             </p>
             <p className="text-[10.5px] text-slate-500 dark:text-slate-400 truncate font-medium">
-              <span className="text-amber-700 dark:text-amber-400 font-semibold">{currentUser.role}</span>
+              <span className="text-amber-700 dark:text-amber-400 font-semibold">{currentUser.role || 'HR Admin'}</span>
             </p>
           </div>
 
           {currentUser.avatarUrl ? (
             <img
+              key={currentUser.avatarUrl}
               src={currentUser.avatarUrl}
-              alt={currentUser.name}
-              className="h-9 w-9 sm:h-10 sm:w-10 rounded-xl object-cover shadow-sm shrink-0 ring-2 ring-amber-400/40"
-              style={{ imageRendering: '-webkit-optimize-contrast' }}
-              title={`${currentUser.name} (${currentUser.role})`}
-              onError={(e) => {
-                // fallback to hidden if image fails
-                (e.target as HTMLElement).style.display = 'none';
-              }}
+              alt={currentUser.name || 'User Avatar'}
+              className="h-9 w-9 sm:h-10 sm:w-10 rounded-xl object-cover object-center shadow-sm shrink-0 ring-2 ring-amber-400/50 bg-slate-900"
+              title={`${currentUser.name || 'Admin'} (${currentUser.role || 'HR Admin'})`}
             />
           ) : (
             <div
-              className="h-9 w-9 sm:h-10 sm:w-10 rounded-xl flex items-center justify-center text-slate-950 font-black shadow-sm shrink-0 text-sm ring-2 ring-amber-400/40"
+              className="h-9 w-9 sm:h-10 sm:w-10 rounded-xl flex items-center justify-center text-slate-950 font-black shadow-sm shrink-0 text-sm ring-2 ring-amber-400/50"
               style={{ background: 'linear-gradient(135deg, #F59E0B, #D97706)' }}
-              title={`${currentUser.name} (${currentUser.role})`}
+              title={`${currentUser.name || 'Admin'} (${currentUser.role || 'HR Admin'})`}
             >
               {userInitial}
             </div>

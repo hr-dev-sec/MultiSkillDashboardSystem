@@ -371,18 +371,115 @@ export async function fetchServerActivityLogs(limit: number = 50): Promise<Activ
 }
 
 /**
- * Fetch persistent email logs from server database
+ * Fetch dedicated users database metadata and info
  */
-export async function fetchServerEmailLogs(limit: number = 50): Promise<EmailLog[]> {
+export async function fetchUserDatabaseInfo(): Promise<{
+  success: boolean;
+  databaseName?: string;
+  fileName?: string;
+  storageType?: string;
+  version?: string;
+  totalUsers?: number;
+  lastUpdated?: string;
+  usersSummary?: Array<{
+    username: string;
+    name: string;
+    role: string;
+    department: string;
+    hasAvatar: boolean;
+    lastLogin: string | null;
+  }>;
+} | null> {
   try {
-    const res = await fetch(`/api/system/email-logs?limit=${limit}`);
-    const { ok, data } = await safeParseJson<{ success: boolean; logs?: EmailLog[] }>(res, '');
-    if (ok && data?.logs) {
-      return data.logs;
+    const res = await fetch('/api/users/database/info');
+    const { ok, data } = await safeParseJson<any>(res, '');
+    if (ok && data?.success) {
+      return data;
     }
-    return [];
+    return null;
   } catch (err) {
-    return [];
+    return null;
+  }
+}
+
+/**
+ * Trigger download of dedicated users database JSON backup file
+ */
+export async function downloadUsersDatabaseBackup(): Promise<boolean> {
+  try {
+    const res = await fetch('/api/users/database/export');
+    if (!res.ok) return false;
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `ajinomoto_users_db_backup_${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    return true;
+  } catch (err) {
+    console.error('Failed to export users database:', err);
+    return false;
+  }
+}
+
+/**
+ * Import and restore users database from JSON string
+ */
+export async function importUsersDatabase(
+  jsonContent: string,
+  operatorUsername?: string
+): Promise<{ success: boolean; message: string; count?: number }> {
+  try {
+    const res = await fetch('/api/users/database/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonContent, operatorUsername: operatorUsername || 'admin' })
+    });
+    const { ok, data, message } = await safeParseJson<{ success: boolean; message: string; count?: number }>(
+      res,
+      'Gagal mengimpor database pengguna.'
+    );
+
+    if (data && typeof data.success === 'boolean') {
+      return data;
+    }
+    return {
+      success: ok,
+      message: message || (ok ? 'Database pengguna berhasil dipulihkan.' : 'Gagal mengimpor database pengguna.')
+    };
+  } catch (err: any) {
+    return { success: false, message: err?.message || 'Gagal terhubung ke server database.' };
+  }
+}
+
+/**
+ * Reset users database to default
+ */
+export async function resetUsersDatabase(
+  operatorUsername?: string
+): Promise<{ success: boolean; message: string }> {
+  try {
+    const res = await fetch('/api/users/database/reset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ operatorUsername: operatorUsername || 'admin' })
+    });
+    const { ok, data, message } = await safeParseJson<{ success: boolean; message: string }>(
+      res,
+      'Gagal mereset database pengguna.'
+    );
+    if (data && typeof data.success === 'boolean') {
+      return data;
+    }
+    return {
+      success: ok,
+      message: message || (ok ? 'Database pengguna berhasil direset.' : 'Gagal mereset database pengguna.')
+    };
+  } catch (err: any) {
+    return { success: false, message: err?.message || 'Gagal mereset database pengguna.' };
   }
 }
 

@@ -1,6 +1,36 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import {
+  initUsersDatabase,
+  getUsersDatabase,
+  persistUsersDatabase,
+  getAllUsers as getUsersFromDb,
+  getUserByUsername as getUserFromDb,
+  authenticateUser as authUserFromDb,
+  updateUserProfile as updateProfileInUserDb,
+  updateUserPhoto as updatePhotoInUserDb,
+  removeUserPhoto as removePhotoInUserDb,
+  changeUserPassword as changePwInUserDb,
+  createNewUser as createUserInUserDb,
+  deleteUser as deleteUserInUserDb,
+  exportUsersDatabaseJson,
+  importUsersDatabaseJson,
+  resetUsersDatabaseToDefault,
+  UserAccountRecord,
+  UsersDatabaseSchema
+} from './usersDb.js';
+
+export type {
+  UserAccountRecord,
+  UsersDatabaseSchema
+};
+
+export {
+  exportUsersDatabaseJson,
+  importUsersDatabaseJson,
+  resetUsersDatabaseToDefault
+};
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -8,23 +38,6 @@ const __dirname = path.dirname(__filename);
 // Data Directory and File Path for Persistent System Database
 const DATA_DIR = path.join(process.cwd(), 'server', 'data');
 const DB_FILE_PATH = path.join(DATA_DIR, 'system_db.json');
-
-export interface UserAccountRecord {
-  username: string;
-  password: string;
-  name: string;
-  role: string;
-  department: string;
-  email?: string;
-  phone?: string;
-  nik?: string;
-  avatarUrl?: string;
-  bio?: string;
-  signatureImage?: string;
-  createdAt: string;
-  updatedAt: string;
-  lastLogin?: string;
-}
 
 export interface SystemConfigRecord {
   smtp: {
@@ -214,37 +227,18 @@ export function getSystemDatabase(): SystemDatabaseSchema {
 }
 
 // -------------------------------------------------------------
-// USER & PROFILING OPERATIONS
+// USER & PROFILING OPERATIONS (Delegated to Dedicated User DB)
 // -------------------------------------------------------------
 export function getAllUsers(): UserAccountRecord[] {
-  const db = getSystemDatabase();
-  return db.users;
+  return getUsersFromDb();
 }
 
 export function getUserByUsername(username: string): UserAccountRecord | null {
-  const db = getSystemDatabase();
-  const found = db.users.find(
-    (u) => u.username.trim().toLowerCase() === username.trim().toLowerCase()
-  );
-  return found || null;
+  return getUserFromDb(username);
 }
 
-export function authenticateUser(username: string, password: string): { success: boolean; message?: string; user?: UserAccountRecord } {
-  const db = getSystemDatabase();
-  const user = db.users.find(
-    (u) => u.username.trim().toLowerCase() === username.trim().toLowerCase() && u.password === password
-  );
-
-  if (!user) {
-    return { success: false, message: 'Username atau password salah. Silakan coba lagi.' };
-  }
-
-  // Update last login
-  user.lastLogin = new Date().toISOString();
-  addActivityLog(user.username, 'LOGIN_SUCCESS', `Login berhasil ke sistem dari ${user.role} (${user.department})`);
-  persistSystemDatabase(db);
-
-  return { success: true, user };
+export function authenticateUser(username: string, password: string, ip?: string): { success: boolean; message?: string; user?: UserAccountRecord } {
+  return authUserFromDb(username, password, ip);
 }
 
 export function updateUserProfile(
@@ -252,56 +246,12 @@ export function updateUserProfile(
   updates: Partial<UserAccountRecord>,
   ip?: string
 ): { success: boolean; message: string; user?: UserAccountRecord } {
-  const db = getSystemDatabase();
-  const index = db.users.findIndex(
-    (u) => u.username.trim().toLowerCase() === targetUsername.trim().toLowerCase()
-  );
-
-  if (index === -1) {
-    return { success: false, message: 'Akun administrator tidak ditemukan di database server.' };
-  }
-
-  const current = db.users[index];
-
-  // Check username uniqueness if changing username
-  if (updates.username && updates.username.trim().toLowerCase() !== targetUsername.trim().toLowerCase()) {
-    const isTaken = db.users.some(
-      (u, idx) => idx !== index && u.username.trim().toLowerCase() === updates.username!.trim().toLowerCase()
-    );
-    if (isTaken) {
-      return { success: false, message: `Username "${updates.username}" telah digunakan oleh akun lain.` };
-    }
-  }
-
-  const updatedUser: UserAccountRecord = {
-    ...current,
-    ...updates,
-    username: updates.username?.trim() || current.username,
-    name: updates.name?.trim() || current.name,
-    role: updates.role?.trim() || current.role,
-    department: updates.department?.trim() || current.department,
-    email: updates.email?.trim() || current.email,
-    phone: updates.phone?.trim() || current.phone,
-    nik: updates.nik?.trim() || current.nik,
-    bio: updates.bio !== undefined ? updates.bio : current.bio,
-    avatarUrl: updates.avatarUrl !== undefined ? updates.avatarUrl : current.avatarUrl,
-    signatureImage: updates.signatureImage !== undefined ? updates.signatureImage : current.signatureImage,
-    updatedAt: new Date().toISOString()
-  };
-
-  db.users[index] = updatedUser;
-
-  // Log action
-  const hasAvatarChange = updates.avatarUrl !== undefined && updates.avatarUrl !== current.avatarUrl;
-  addActivityLog(
-    updatedUser.username,
-    hasAvatarChange ? 'PHOTO_UPDATED' : 'PROFILE_UPDATED',
-    `Memperbarui data profil: ${updatedUser.name} (${updatedUser.role} - ${updatedUser.department})${hasAvatarChange ? ' beserta foto profil' : ''}`,
-    ip
-  );
-
-  persistSystemDatabase(db);
-  return { success: true, message: 'Profil dan foto pengguna berhasil diperbarui di database server.', user: updatedUser };
+  const result = updateProfileInUserDb(targetUsername, updates, ip);
+  // Keep system database mirror in sync
+  const sysDb = getSystemDatabase();
+  sysDb.users = getUsersFromDb();
+  persistSystemDatabase(sysDb);
+  return result;
 }
 
 export function updateUserPhoto(
@@ -309,14 +259,22 @@ export function updateUserPhoto(
   avatarUrl: string,
   ip?: string
 ): { success: boolean; message: string; user?: UserAccountRecord } {
-  return updateUserProfile(username, { avatarUrl }, ip);
+  const result = updatePhotoInUserDb(username, avatarUrl, ip);
+  const sysDb = getSystemDatabase();
+  sysDb.users = getUsersFromDb();
+  persistSystemDatabase(sysDb);
+  return result;
 }
 
 export function removeUserPhoto(
   username: string,
   ip?: string
 ): { success: boolean; message: string; user?: UserAccountRecord } {
-  return updateUserProfile(username, { avatarUrl: '' }, ip);
+  const result = removePhotoInUserDb(username, ip);
+  const sysDb = getSystemDatabase();
+  sysDb.users = getUsersFromDb();
+  persistSystemDatabase(sysDb);
+  return result;
 }
 
 export function changeUserPassword(
@@ -325,30 +283,11 @@ export function changeUserPassword(
   newPw: string,
   ip?: string
 ): { success: boolean; message: string } {
-  const db = getSystemDatabase();
-  const index = db.users.findIndex(
-    (u) => u.username.trim().toLowerCase() === username.trim().toLowerCase()
-  );
-
-  if (index === -1) {
-    return { success: false, message: 'Akun pengguna tidak ditemukan di database server.' };
-  }
-
-  if (db.users[index].password !== oldPw) {
-    return { success: false, message: 'Kata sandi lama tidak sesuai.' };
-  }
-
-  if (!newPw || newPw.length < 6) {
-    return { success: false, message: 'Kata sandi baru minimal 6 karakter.' };
-  }
-
-  db.users[index].password = newPw;
-  db.users[index].updatedAt = new Date().toISOString();
-
-  addActivityLog(username, 'PASSWORD_CHANGED', `Mengganti kata sandi akun ${username}`, ip);
-  persistSystemDatabase(db);
-
-  return { success: true, message: 'Kata sandi akun berhasil diperbarui di database server.' };
+  const result = changePwInUserDb(username, oldPw, newPw, ip);
+  const sysDb = getSystemDatabase();
+  sysDb.users = getUsersFromDb();
+  persistSystemDatabase(sysDb);
+  return result;
 }
 
 export function createNewUser(
@@ -356,26 +295,11 @@ export function createNewUser(
   creatorUsername: string = 'system',
   ip?: string
 ): { success: boolean; message: string; user?: UserAccountRecord } {
-  const db = getSystemDatabase();
-  const exists = db.users.some(
-    (u) => u.username.trim().toLowerCase() === newUser.username.trim().toLowerCase()
-  );
-
-  if (exists) {
-    return { success: false, message: `Username "${newUser.username}" sudah terdaftar.` };
-  }
-
-  const record: UserAccountRecord = {
-    ...newUser,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  };
-
-  db.users.push(record);
-  addActivityLog(creatorUsername, 'USER_CREATED', `Membuat akun pengguna baru: ${record.username} (${record.name})`, ip);
-  persistSystemDatabase(db);
-
-  return { success: true, message: `Akun ${record.name} berhasil ditambahkan ke database server.`, user: record };
+  const result = createUserInUserDb(newUser, creatorUsername, ip);
+  const sysDb = getSystemDatabase();
+  sysDb.users = getUsersFromDb();
+  persistSystemDatabase(sysDb);
+  return result;
 }
 
 export function deleteUser(
@@ -383,24 +307,11 @@ export function deleteUser(
   removerUsername: string = 'system',
   ip?: string
 ): { success: boolean; message: string } {
-  const db = getSystemDatabase();
-  if (targetUsername.trim().toLowerCase() === 'hr_admin') {
-    return { success: false, message: 'Akun Super Administrator utama (hr_admin) tidak dapat dihapus.' };
-  }
-
-  const index = db.users.findIndex(
-    (u) => u.username.trim().toLowerCase() === targetUsername.trim().toLowerCase()
-  );
-
-  if (index === -1) {
-    return { success: false, message: 'Pengguna tidak ditemukan.' };
-  }
-
-  const deleted = db.users.splice(index, 1)[0];
-  addActivityLog(removerUsername, 'USER_DELETED', `Menghapus akun pengguna: ${deleted.username} (${deleted.name})`, ip);
-  persistSystemDatabase(db);
-
-  return { success: true, message: `Akun ${deleted.name} berhasil dihapus dari database server.` };
+  const result = deleteUserInUserDb(targetUsername, removerUsername, ip);
+  const sysDb = getSystemDatabase();
+  sysDb.users = getUsersFromDb();
+  persistSystemDatabase(sysDb);
+  return result;
 }
 
 // -------------------------------------------------------------
