@@ -59,11 +59,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   // 0. Profile State
   const [adminName, setAdminName] = useState(currentUser.name || 'Mahmud Nurdiansyah');
   const [adminUsername, setAdminUsername] = useState(currentUser.username || 'hr_admin');
-  const [adminNik, setAdminNik] = useState(currentUser.nik || 'AJI-HRD-0104');
+  const [adminNik, setAdminNik] = useState(currentUser.nik || '122108091');
   const [adminRole, setAdminRole] = useState(currentUser.role || 'HR Development Admin');
   const [adminDepartment, setAdminDepartment] = useState(currentUser.department || 'Human Resources Development');
-  const [adminEmail, setAdminEmail] = useState(currentUser.email || 'mahmud.nurdiansyah@ajinomoto.co.id');
-  const [adminPhone, setAdminPhone] = useState(currentUser.phone || '0812-3456-7890');
+  const [adminEmail, setAdminEmail] = useState(currentUser.email || 'mahmudnurdiansyah4@gmail.com');
+  const [adminPhone, setAdminPhone] = useState(currentUser.phone || '0819-1932-7912');
   const [adminBio, setAdminBio] = useState(currentUser.bio || 'Administrator Multi-Skill Monitoring & Pengembangan Kompetensi Karyawan PT Ajinomoto Indonesia Mojokerto Factory.');
   const [adminAvatarUrl, setAdminAvatarUrl] = useState(currentUser.avatarUrl || '');
   const [profileAlert, setProfileAlert] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -73,11 +73,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   useEffect(() => {
     setAdminName(currentUser.name || 'Mahmud Nurdiansyah');
     setAdminUsername(currentUser.username || 'hr_admin');
-    setAdminNik(currentUser.nik || 'AJI-HRD-0104');
+    setAdminNik(currentUser.nik || '122108091');
     setAdminRole(currentUser.role || 'HR Development Admin');
     setAdminDepartment(currentUser.department || 'Human Resources Development');
-    setAdminEmail(currentUser.email || 'mahmud.nurdiansyah@ajinomoto.co.id');
-    setAdminPhone(currentUser.phone || '0812-3456-7890');
+    setAdminEmail(currentUser.email || 'mahmudnurdiansyah4@gmail.com');
+    setAdminPhone(currentUser.phone || '0819-1932-7912');
     setAdminBio(currentUser.bio || 'Administrator Multi-Skill Monitoring & Pengembangan Kompetensi Karyawan PT Ajinomoto Indonesia Mojokerto Factory.');
     setAdminAvatarUrl(currentUser.avatarUrl || '');
   }, [currentUser]);

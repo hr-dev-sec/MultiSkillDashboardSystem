@@ -28,9 +28,9 @@ export const INITIAL_USERS: UserAccount[] = [
     name: 'Mahmud Nurdiansyah',
     role: 'HR Development Admin',
     department: 'Human Resources Development',
-    email: 'mahmud.nurdiansyah@ajinomoto.co.id',
-    phone: '0812-3456-7890',
-    nik: 'AJI-HRD-0104',
+    email: 'mahmudnurdiansyah4@gmail.com',
+    phone: '0819-1932-7912',
+    nik: '122108091',
     avatarUrl: '',
     bio: 'Administrator Multi-Skill Monitoring & Pengembangan Kompetensi Karyawan PT Ajinomoto Indonesia Mojokerto Factory.'
   }
