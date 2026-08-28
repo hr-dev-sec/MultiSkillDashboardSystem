@@ -64,8 +64,9 @@ async function startServer() {
   app.get('/api/system/init', (req, res) => {
     try {
       const db = getSystemDatabase();
+      const freshUsers = getAllUsers();
       // Remove passwords from public user lists
-      const sanitizedUsers = db.users.map(({ password, ...rest }) => rest);
+      const sanitizedUsers = freshUsers.map(({ password, ...rest }) => rest);
       res.json({
         success: true,
         users: sanitizedUsers,
@@ -89,7 +90,8 @@ async function startServer() {
         return res.status(400).json({ success: false, message: 'Username dan kata sandi wajib diisi.' });
       }
 
-      const result = authenticateUser(username, password);
+      const clientIp = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress;
+      const result = authenticateUser(username, password, clientIp);
       if (!result.success || !result.user) {
         return res.status(401).json({ success: false, message: result.message || 'Kredensial tidak valid.' });
       }
@@ -134,6 +136,74 @@ async function startServer() {
     } catch (err: any) {
       console.error('Password change error:', err);
       return res.status(500).json({ success: false, message: 'Gagal memperbarui kata sandi di server.' });
+    }
+  });
+
+  // =========================================================================
+  // API ROUTE: DEDICATED USER DATABASE TOOLS (EXPORT / IMPORT / INFO / RESET)
+  // MUST BE PLACED BEFORE /api/users/:username to avoid routing conflicts
+  // =========================================================================
+  app.get('/api/users/database/info', (req, res) => {
+    try {
+      const userDb = getUsersDatabase();
+      res.json({
+        success: true,
+        databaseName: userDb.databaseName,
+        fileName: 'users_db.json',
+        storageType: 'Dedicated Isolated JSON Database',
+        version: userDb.version,
+        totalUsers: userDb.users.length,
+        lastUpdated: userDb.lastUpdated,
+        usersSummary: userDb.users.map((u) => ({
+          username: u.username,
+          name: u.name,
+          role: u.role,
+          department: u.department,
+          hasAvatar: Boolean(u.avatarUrl),
+          lastLogin: u.lastLogin || null
+        }))
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: 'Gagal membaca metadata database pengguna.' });
+    }
+  });
+
+  app.get('/api/users/database/export', (req, res) => {
+    try {
+      const jsonStr = exportUsersDatabaseJson();
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Content-Disposition', `attachment; filename="ajinomoto_users_database_${Date.now()}.json"`);
+      res.send(jsonStr);
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: 'Gagal mengekspor database pengguna.' });
+    }
+  });
+
+  app.post('/api/users/database/import', (req, res) => {
+    try {
+      const { jsonContent, operatorUsername } = req.body || {};
+      if (!jsonContent) {
+        return res.status(400).json({ success: false, message: 'Konten JSON database pengguna wajib disertakan.' });
+      }
+
+      const clientIp = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress;
+      const result = importUsersDatabaseJson(jsonContent, operatorUsername || 'admin', clientIp);
+      if (!result.success) {
+        return res.status(400).json(result);
+      }
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: 'Gagal mengimpor database pengguna.' });
+    }
+  });
+
+  app.post('/api/users/database/reset', (req, res) => {
+    try {
+      const clientIp = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress;
+      const result = resetUsersDatabaseToDefault(req.body.operatorUsername || 'admin', clientIp);
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: 'Gagal mereset database pengguna.' });
     }
   });
 
@@ -275,73 +345,6 @@ async function startServer() {
       res.json(result);
     } catch (err: any) {
       res.status(500).json({ success: false, message: 'Gagal menghapus akun pengguna.' });
-    }
-  });
-
-  // =========================================================================
-  // API ROUTE: DEDICATED USER DATABASE TOOLS (EXPORT / IMPORT / INFO / RESET)
-  // =========================================================================
-  app.get('/api/users/database/info', (req, res) => {
-    try {
-      const userDb = getUsersDatabase();
-      res.json({
-        success: true,
-        databaseName: userDb.databaseName,
-        fileName: 'users_db.json',
-        storageType: 'Dedicated Isolated JSON Database',
-        version: userDb.version,
-        totalUsers: userDb.users.length,
-        lastUpdated: userDb.lastUpdated,
-        usersSummary: userDb.users.map((u) => ({
-          username: u.username,
-          name: u.name,
-          role: u.role,
-          department: u.department,
-          hasAvatar: Boolean(u.avatarUrl),
-          lastLogin: u.lastLogin || null
-        }))
-      });
-    } catch (err: any) {
-      res.status(500).json({ success: false, message: 'Gagal membaca metadata database pengguna.' });
-    }
-  });
-
-  app.get('/api/users/database/export', (req, res) => {
-    try {
-      const jsonStr = exportUsersDatabaseJson();
-      res.setHeader('Content-Type', 'application/json');
-      res.setHeader('Content-Disposition', `attachment; filename="ajinomoto_users_database_${Date.now()}.json"`);
-      res.send(jsonStr);
-    } catch (err: any) {
-      res.status(500).json({ success: false, message: 'Gagal mengekspor database pengguna.' });
-    }
-  });
-
-  app.post('/api/users/database/import', (req, res) => {
-    try {
-      const { jsonContent, operatorUsername } = req.body || {};
-      if (!jsonContent) {
-        return res.status(400).json({ success: false, message: 'Konten JSON database pengguna wajib disertakan.' });
-      }
-
-      const clientIp = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress;
-      const result = importUsersDatabaseJson(jsonContent, operatorUsername || 'admin', clientIp);
-      if (!result.success) {
-        return res.status(400).json(result);
-      }
-      res.json(result);
-    } catch (err: any) {
-      res.status(500).json({ success: false, message: 'Gagal mengimpor database pengguna.' });
-    }
-  });
-
-  app.post('/api/users/database/reset', (req, res) => {
-    try {
-      const clientIp = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress;
-      const result = resetUsersDatabaseToDefault(req.body.operatorUsername || 'admin', clientIp);
-      res.json(result);
-    } catch (err: any) {
-      res.status(500).json({ success: false, message: 'Gagal mereset database pengguna.' });
     }
   });
 

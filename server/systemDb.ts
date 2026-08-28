@@ -221,9 +221,10 @@ export function persistSystemDatabase(db: SystemDatabaseSchema): boolean {
 // Get Database State
 export function getSystemDatabase(): SystemDatabaseSchema {
   if (!inMemoryDb) {
-    return initSystemDatabase();
+    initSystemDatabase();
   }
-  return inMemoryDb;
+  inMemoryDb!.users = getUsersFromDb();
+  return inMemoryDb!;
 }
 
 // -------------------------------------------------------------
