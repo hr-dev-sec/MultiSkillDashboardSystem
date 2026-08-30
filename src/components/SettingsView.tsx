@@ -1255,124 +1255,158 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   {activeSettingsTab === 'tools' && (
     <div className="space-y-6">
       {/* ROW 1.5: DATABASE SISTEM & BACKUP / RESTORE */}
-      <div className="card-elegant p-6 border border-indigo-500/30 bg-gradient-to-br from-white via-white to-indigo-50/20 dark:from-slate-900 dark:via-slate-900 dark:to-indigo-950/20 space-y-5">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div>
-            <p className="eyebrow !text-indigo-600 dark:text-indigo-400 text-[10px] uppercase font-bold tracking-wider mb-1 flex items-center gap-1.5">
+      <div className="card-elegant p-6 border border-indigo-500/30 bg-gradient-to-br from-white via-white to-indigo-50/20 dark:from-slate-900 dark:via-slate-900 dark:to-indigo-950/20 space-y-6">
+        {/* Header Title and Server Status */}
+        <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 pb-5 border-b border-slate-100 dark:border-slate-800">
+          <div className="space-y-1.5 max-w-2xl">
+            <p className="eyebrow !text-indigo-600 dark:text-indigo-400 text-[10px] uppercase font-bold tracking-wider flex items-center gap-1.5">
               <i className="fa-solid fa-database text-indigo-600 dark:text-indigo-400"></i> Dedicated User &amp; Profile Database
             </p>
-            <h3 className="section-title text-base sm:text-lg mb-1 flex items-center gap-2 text-slate-900 dark:text-white">
-              Database Pengguna Khusus &amp; Backup / Restore
+            <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight flex items-center gap-2.5">
+              <span>Database Pengguna Khusus &amp; Backup / Restore</span>
             </h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400 max-w-3xl leading-relaxed">
-              Database pengguna kini terisolasi secara mandiri dalam file <code className="font-mono px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-semibold">server/data/users_db.json</code>. Menyimpan seluruh akun, foto profil HD, dan kredensial login dengan mekanisme penulisan atomik tanpa bergantung pada log operasional sistem.
+            <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+              Database pengguna terisolasi secara mandiri dalam file <code className="font-mono px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-semibold text-[11px]">server/data/users_db.json</code>. Menyimpan seluruh akun, foto profil HD, dan kredensial login dengan penulisan atomik yang aman.
             </p>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0 flex-wrap">
-            <div className="px-3 py-1.5 rounded-xl bg-emerald-100 dark:bg-emerald-950/80 border border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 text-xs font-bold flex items-center gap-2 shadow-xs">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+          <div className="flex flex-wrap items-center gap-3 shrink-0">
+            <div className="px-3.5 py-2 rounded-xl bg-emerald-100 dark:bg-emerald-950/80 border border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 text-xs font-bold flex items-center gap-2 shadow-xs">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
               <span>Server DB Aktif</span>
             </div>
 
-            {/* Menu Dropdown / Button Actions for User DB */}
-            <div className="flex items-center gap-1.5 p-1 rounded-xl bg-indigo-50/80 dark:bg-indigo-950/50 border border-indigo-200/80 dark:border-indigo-800/80">
-              <span className="text-[11px] font-bold text-indigo-900 dark:text-indigo-200 px-2 flex items-center gap-1">
-                <i className="fa-solid fa-user-shield text-indigo-500"></i> User DB:
-              </span>
+            <button
+              type="button"
+              onClick={() => setIsAddUserModalOpen(true)}
+              className="btn-navy px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 shadow-md hover:opacity-95 transition active:scale-95 cursor-pointer"
+            >
+              <i className="fa-solid fa-user-plus text-amber-400 text-xs"></i>
+              <span>+ Tambah Akun</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Action Panels: User DB & Full System DB */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* Card 1: User Database Backup & Restore */}
+          <div className="p-4.5 rounded-2xl bg-white dark:bg-slate-800/90 border border-indigo-200/90 dark:border-indigo-900/60 shadow-xs flex flex-col justify-between gap-3.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 flex items-center justify-center text-sm font-bold shadow-2xs">
+                  <i className="fa-solid fa-user-shield"></i>
+                </div>
+                <div>
+                  <h4 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white">
+                    Database Akun Pengguna (User DB)
+                  </h4>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    File <code className="font-mono text-indigo-600 dark:text-indigo-400">users_db.json</code> ({systemUsers.length} akun terdaftar)
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-100 dark:border-slate-700/60">
               <button
                 type="button"
                 onClick={handleBackupUserDb}
                 disabled={isExportingUserDb}
-                className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-white dark:bg-slate-800 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900 flex items-center gap-1 shadow-xs cursor-pointer transition disabled:opacity-50"
-                title="Unduh file users_db.json"
+                className="flex-1 min-w-[85px] px-3 py-2 rounded-xl text-xs font-bold bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/70 dark:hover:bg-indigo-900/80 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer transition active:scale-95 disabled:opacity-50"
+                title="Unduh file backup users_db.json"
               >
-                <i className={`fa-solid fa-download text-[10px] ${isExportingUserDb ? 'animate-bounce' : ''}`}></i>
+                <i className={`fa-solid fa-download text-[11px] ${isExportingUserDb ? 'animate-bounce' : ''}`}></i>
                 <span>Unduh</span>
               </button>
               <button
                 type="button"
                 onClick={handleCopyUserDbJson}
-                className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-white dark:bg-slate-800 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900 flex items-center gap-1 shadow-xs cursor-pointer transition"
+                className="px-3 py-2 rounded-xl text-xs font-bold bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer transition active:scale-95"
                 title="Salin isi JSON User DB ke Clipboard"
               >
-                <i className="fa-solid fa-copy text-[10px]"></i>
+                <i className="fa-solid fa-copy text-[11px]"></i>
                 <span>Salin</span>
               </button>
               <button
                 type="button"
                 onClick={handleViewUserDbJson}
-                className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-white dark:bg-slate-800 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900 flex items-center gap-1 shadow-xs cursor-pointer transition"
+                className="px-3 py-2 rounded-xl text-xs font-bold bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer transition active:scale-95"
                 title="Lihat teks JSON User DB"
               >
-                <i className="fa-solid fa-eye text-[10px]"></i>
+                <i className="fa-solid fa-eye text-[11px]"></i>
                 <span>Lihat</span>
               </button>
+              <label className="px-3 py-2 rounded-xl text-xs font-bold bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/70 dark:hover:bg-emerald-900/80 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer transition active:scale-95">
+                <i className={`fa-solid fa-upload text-[11px] ${isImportingUserDb ? 'animate-spin' : ''}`}></i>
+                <span>{isImportingUserDb ? 'Memulihkan...' : 'Restore DB'}</span>
+                <input
+                  type="file"
+                  accept=".json"
+                  onChange={handleImportUserDbFile}
+                  disabled={isImportingUserDb}
+                  className="hidden"
+                />
+              </label>
+            </div>
+          </div>
+
+          {/* Card 2: Full System Database & Reset */}
+          <div className="p-4.5 rounded-2xl bg-white dark:bg-slate-800/90 border border-amber-200/90 dark:border-amber-900/60 shadow-xs flex flex-col justify-between gap-3.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-amber-100 dark:bg-amber-900/60 text-amber-700 dark:text-amber-300 flex items-center justify-center text-sm font-bold shadow-2xs">
+                  <i className="fa-solid fa-box-archive"></i>
+                </div>
+                <div>
+                  <h4 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white">
+                    Database Lengkap Sistem (Full DB)
+                  </h4>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    File <code className="font-mono text-amber-700 dark:text-amber-300">system_db.json</code> (Karyawan, Skill, Log, Config)
+                  </p>
+                </div>
+              </div>
             </div>
 
-            {/* Menu Dropdown / Button Actions for Full System DB */}
-            <div className="flex items-center gap-1.5 p-1 rounded-xl bg-amber-50/80 dark:bg-amber-950/50 border border-amber-200/80 dark:border-amber-800/80">
-              <span className="text-[11px] font-bold text-amber-900 dark:text-amber-200 px-2 flex items-center gap-1">
-                <i className="fa-solid fa-box-archive text-amber-500"></i> Full Sistem DB:
-              </span>
+            <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-100 dark:border-slate-700/60">
               <button
                 type="button"
                 onClick={handleBackupFullSystemDb}
                 disabled={isExportingFullDb}
-                className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-white dark:bg-slate-800 text-amber-900 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900 flex items-center gap-1 shadow-xs cursor-pointer transition disabled:opacity-50"
+                className="flex-1 min-w-[85px] px-3 py-2 rounded-xl text-xs font-bold bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/70 dark:hover:bg-amber-900/80 text-amber-900 dark:text-amber-300 border border-amber-200 dark:border-amber-800 flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer transition active:scale-95 disabled:opacity-50"
                 title="Unduh file backup lengkap (Karyawan, Skill, Akun, Config)"
               >
-                <i className={`fa-solid fa-download text-[10px] ${isExportingFullDb ? 'animate-bounce' : ''}`}></i>
+                <i className={`fa-solid fa-download text-[11px] ${isExportingFullDb ? 'animate-bounce' : ''}`}></i>
                 <span>Unduh</span>
               </button>
               <button
                 type="button"
                 onClick={handleCopyFullSystemDbJson}
-                className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-white dark:bg-slate-800 text-amber-900 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900 flex items-center gap-1 shadow-xs cursor-pointer transition"
+                className="px-3 py-2 rounded-xl text-xs font-bold bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer transition active:scale-95"
                 title="Salin isi JSON Full Sistem DB ke Clipboard"
               >
-                <i className="fa-solid fa-copy text-[10px]"></i>
+                <i className="fa-solid fa-copy text-[11px]"></i>
                 <span>Salin</span>
               </button>
               <button
                 type="button"
                 onClick={handleViewFullSystemDbJson}
-                className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-white dark:bg-slate-800 text-amber-900 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900 flex items-center gap-1 shadow-xs cursor-pointer transition"
+                className="px-3 py-2 rounded-xl text-xs font-bold bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer transition active:scale-95"
                 title="Lihat teks JSON Full Sistem DB"
               >
-                <i className="fa-solid fa-eye text-[10px]"></i>
+                <i className="fa-solid fa-eye text-[11px]"></i>
                 <span>Lihat</span>
               </button>
+              <button
+                type="button"
+                onClick={handleResetUserDb}
+                className="px-3 py-2 rounded-xl text-xs font-bold bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/70 dark:hover:bg-rose-900/80 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer transition active:scale-95"
+                title="Reset database user ke setelan default"
+              >
+                <i className="fa-solid fa-rotate-left text-[11px]"></i>
+                <span>Reset</span>
+              </button>
             </div>
-
-            <label className="px-3 py-2 rounded-xl text-xs font-bold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-750 flex items-center gap-1.5 shadow-xs cursor-pointer transition">
-              <i className={`fa-solid fa-upload text-emerald-500 ${isImportingUserDb ? 'animate-spin' : ''}`}></i>
-              <span>{isImportingUserDb ? 'Memulihkan...' : 'Restore DB'}</span>
-              <input
-                type="file"
-                accept=".json"
-                onChange={handleImportUserDbFile}
-                disabled={isImportingUserDb}
-                className="hidden"
-              />
-            </label>
-            <button
-              type="button"
-              onClick={handleResetUserDb}
-              className="px-3 py-2 rounded-xl text-xs font-bold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:text-amber-600 hover:border-amber-300 flex items-center gap-1.5 shadow-xs cursor-pointer transition"
-              title="Reset database user ke setelan default"
-            >
-              <i className="fa-solid fa-rotate-left text-xs"></i>
-              <span>Reset</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setIsAddUserModalOpen(true)}
-              className="btn-navy px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 shadow-sm cursor-pointer hover:opacity-95 transition"
-            >
-              <i className="fa-solid fa-user-plus text-amber-400 text-xs"></i>
-              <span>Tambah Akun</span>
-            </button>
           </div>
         </div>
 
