@@ -16,6 +16,8 @@ import {
   changeUserPassword,
   createNewUser,
   deleteUser,
+  adminUpdateUser,
+  adminResetUserPassword,
   getSystemConfig,
   updateSystemConfig,
   getActivityLogs,
@@ -109,11 +111,17 @@ async function startServer() {
         name: safeUser.name,
         role: safeUser.role,
         department: safeUser.department,
-        email: safeUser.email || 'mahmudnurdiansyah4@gmail.com',
-        phone: safeUser.phone || '0819-1932-7912',
-        nik: safeUser.nik || '122108091',
+        divisi: safeUser.divisi || '',
+        scopeType: safeUser.scopeType || 'ALL',
+        scopeValue: safeUser.scopeValue || '',
+        status: safeUser.status || 'ACTIVE',
+        email: safeUser.email || '',
+        phone: safeUser.phone || '',
+        nik: safeUser.nik || '',
         avatarUrl: safeUser.avatarUrl || '',
-        bio: safeUser.bio || 'Administrator Multi-Skill Monitoring & Pengembangan Kompetensi Karyawan PT Ajinomoto Indonesia Mojokerto Factory.',
+        bio: safeUser.bio || '',
+        canEditCompetency: safeUser.canEditCompetency !== undefined ? safeUser.canEditCompetency : true,
+        canManageUsers: safeUser.canManageUsers !== undefined ? safeUser.canManageUsers : (safeUser.username === 'hr_admin'),
         token: 'tok_' + Math.random().toString(36).substring(2) + Date.now().toString(36)
       };
 
@@ -454,13 +462,55 @@ async function startServer() {
     try {
       const targetUsername = req.params.username;
       const clientIp = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress;
-      const result = deleteUser(targetUsername, 'admin', clientIp);
+      const result = deleteUser(targetUsername, req.body.operatorUsername || 'hr_admin', clientIp);
       if (!result.success) {
         return res.status(400).json(result);
       }
       res.json(result);
     } catch (err: any) {
       res.status(500).json({ success: false, message: 'Gagal menghapus akun pengguna.' });
+    }
+  });
+
+  // Admin Update User Account (all fields + optional password)
+  app.put('/api/users/:username/admin-update', (req, res) => {
+    try {
+      const targetUsername = req.params.username;
+      const updates = req.body || {};
+      const operator = req.body.operatorUsername || 'hr_admin';
+      const clientIp = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress;
+
+      const result = adminUpdateUser(targetUsername, updates, operator, clientIp);
+      if (!result.success || !result.user) {
+        return res.status(400).json(result);
+      }
+
+      const { password, ...safeUser } = result.user;
+      res.json({ success: true, message: result.message, user: safeUser });
+    } catch (err: any) {
+      console.error('Admin update user error:', err);
+      res.status(500).json({ success: false, message: 'Gagal memperbarui data akun pengguna.' });
+    }
+  });
+
+  // Admin Reset User Password
+  app.post('/api/users/:username/reset-password', (req, res) => {
+    try {
+      const targetUsername = req.params.username;
+      const { newPassword, operatorUsername } = req.body || {};
+      if (!newPassword || newPassword.length < 6) {
+        return res.status(400).json({ success: false, message: 'Kata sandi baru minimal 6 karakter.' });
+      }
+
+      const clientIp = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress;
+      const result = adminResetUserPassword(targetUsername, newPassword, operatorUsername || 'hr_admin', clientIp);
+      if (!result.success) {
+        return res.status(400).json(result);
+      }
+      res.json(result);
+    } catch (err: any) {
+      console.error('Admin reset password error:', err);
+      res.status(500).json({ success: false, message: 'Gagal mereset kata sandi pengguna.' });
     }
   });
 

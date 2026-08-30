@@ -14,6 +14,8 @@ import {
   changeUserPassword as changePwInUserDb,
   createNewUser as createUserInUserDb,
   deleteUser as deleteUserInUserDb,
+  adminUpdateUser,
+  adminResetUserPassword,
   exportUsersDatabaseJson,
   importUsersDatabaseJson,
   resetUsersDatabaseToDefault,
@@ -27,6 +29,8 @@ export type {
 };
 
 export {
+  adminUpdateUser,
+  adminResetUserPassword,
   exportUsersDatabaseJson,
   importUsersDatabaseJson,
   resetUsersDatabaseToDefault

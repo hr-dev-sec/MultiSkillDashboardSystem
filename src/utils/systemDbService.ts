@@ -493,6 +493,8 @@ export async function downloadUsersDatabaseBackup(): Promise<boolean> {
   }
 }
 
+export const exportUsersDatabase = downloadUsersDatabaseBackup;
+
 /**
  * Get complete full system backup JSON text
  */
@@ -637,6 +639,141 @@ export async function importUsersDatabase(
     };
   } catch (err: any) {
     return { success: false, message: err?.message || 'Gagal terhubung ke server database.' };
+  }
+}
+
+/**
+ * Fetch all master user accounts from Server Database
+ */
+export async function fetchAllMasterUsers(): Promise<UserAccount[]> {
+  try {
+    const res = await fetch('/api/users');
+    const { ok, data } = await safeParseJson<{ success: boolean; users: UserAccount[] }>(res, 'Gagal memuat master user.');
+    if (ok && data?.success && Array.isArray(data.users)) {
+      return data.users;
+    }
+    return [];
+  } catch (err) {
+    console.error('Error fetching master users list:', err);
+    return [];
+  }
+}
+
+/**
+ * Admin: Create new user account in server database
+ */
+export async function createMasterUserAccount(
+  userData: Partial<UserAccount> & { password: string },
+  creatorUsername: string = 'hr_admin'
+): Promise<{ success: boolean; message: string; user?: UserAccount }> {
+  try {
+    const res = await fetch('/api/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...userData, creatorUsername })
+    });
+    const { ok, data, message } = await safeParseJson<{ success: boolean; message: string; user?: UserAccount }>(
+      res,
+      'Gagal membuat akun master pengguna.'
+    );
+    if (data && typeof data.success === 'boolean') {
+      return data;
+    }
+    return {
+      success: ok,
+      message: message || (ok ? 'Akun berhasil dibuat.' : 'Gagal membuat akun.')
+    };
+  } catch (err: any) {
+    return { success: false, message: err?.message || 'Gagal terhubung ke database server.' };
+  }
+}
+
+/**
+ * Admin: Update user account in server database
+ */
+export async function adminUpdateMasterUser(
+  username: string,
+  updates: Partial<UserAccount> & { newPassword?: string },
+  operatorUsername: string = 'hr_admin'
+): Promise<{ success: boolean; message: string; user?: UserAccount }> {
+  try {
+    const res = await fetch(`/api/users/${encodeURIComponent(username)}/admin-update`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...updates, operatorUsername })
+    });
+    const { ok, data, message } = await safeParseJson<{ success: boolean; message: string; user?: UserAccount }>(
+      res,
+      'Gagal memperbarui akun di server.'
+    );
+    if (data && typeof data.success === 'boolean') {
+      return data;
+    }
+    return {
+      success: ok,
+      message: message || (ok ? 'Akun berhasil diperbarui.' : 'Gagal memperbarui akun.')
+    };
+  } catch (err: any) {
+    return { success: false, message: err?.message || 'Gagal terhubung ke database server.' };
+  }
+}
+
+/**
+ * Admin: Reset user password in server database
+ */
+export async function adminResetUserPasswordApi(
+  username: string,
+  newPassword: string,
+  operatorUsername: string = 'hr_admin'
+): Promise<{ success: boolean; message: string }> {
+  try {
+    const res = await fetch(`/api/users/${encodeURIComponent(username)}/reset-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ newPassword, operatorUsername })
+    });
+    const { ok, data, message } = await safeParseJson<{ success: boolean; message: string }>(
+      res,
+      'Gagal mereset kata sandi pengguna.'
+    );
+    if (data && typeof data.success === 'boolean') {
+      return data;
+    }
+    return {
+      success: ok,
+      message: message || (ok ? 'Kata sandi berhasil direset.' : 'Gagal mereset kata sandi.')
+    };
+  } catch (err: any) {
+    return { success: false, message: err?.message || 'Gagal terhubung ke database server.' };
+  }
+}
+
+/**
+ * Admin: Delete user account from server database
+ */
+export async function deleteMasterUserAccount(
+  username: string,
+  operatorUsername: string = 'hr_admin'
+): Promise<{ success: boolean; message: string }> {
+  try {
+    const res = await fetch(`/api/users/${encodeURIComponent(username)}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ operatorUsername })
+    });
+    const { ok, data, message } = await safeParseJson<{ success: boolean; message: string }>(
+      res,
+      'Gagal menghapus akun pengguna.'
+    );
+    if (data && typeof data.success === 'boolean') {
+      return data;
+    }
+    return {
+      success: ok,
+      message: message || (ok ? 'Akun berhasil dihapus.' : 'Gagal menghapus akun.')
+    };
+  } catch (err: any) {
+    return { success: false, message: err?.message || 'Gagal terhubung ke database server.' };
   }
 }
 

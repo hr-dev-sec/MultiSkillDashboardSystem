@@ -37,6 +37,7 @@ import { ExportExcelConfirmModal } from './ExportExcelConfirmModal';
 import { ExportPdfModal } from './ExportPdfModal';
 import { ConfirmationModal, ConfirmationVariant } from './ConfirmationModal';
 import { HdPhotoModal } from './HdPhotoModal';
+import { MasterUsersManagement } from './MasterUsersManagement';
 import { optimizeImageToHd } from '../utils/imageOptimizer';
 import confetti from 'canvas-confetti';
 
@@ -65,6 +66,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onOpenImportModal,
   onUpdateCurrentUser
 }) => {
+  // Settings Tab Selector: 'master_users' | 'profile' | 'tools' | 'smtp' | 'logs'
+  const [activeSettingsTab, setActiveSettingsTab] = useState<'master_users' | 'profile' | 'tools' | 'smtp' | 'logs'>('master_users');
+
   // 0. Profile State
   const [adminName, setAdminName] = useState(currentUser.name || 'Mahmud Nurdiansyah');
   const [adminUsername, setAdminUsername] = useState(currentUser.username || 'hr_admin');
@@ -725,8 +729,119 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* ROW 0: PROFIL ADMINISTRATOR UTAMA */}
-      <div className="card-elegant p-6 relative overflow-hidden">
+      {/* SETTINGS SUB-NAVIGATION TABS */}
+      <div className="flex items-center gap-2 p-1.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs overflow-x-auto">
+        <button
+          type="button"
+          onClick={() => setActiveSettingsTab('master_users')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap cursor-pointer ${
+            activeSettingsTab === 'master_users'
+              ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60'
+          }`}
+        >
+          <i className="fa-solid fa-users-gear text-sm"></i>
+          <span>Master Akun &amp; Hak Akses</span>
+          <span className={`ml-1 px-1.5 py-0.2 rounded-full text-[10px] font-extrabold ${
+            activeSettingsTab === 'master_users' ? 'bg-slate-950/20 text-slate-950' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+          }`}>
+            {systemUsers.length}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveSettingsTab('profile')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap cursor-pointer ${
+            activeSettingsTab === 'profile'
+              ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60'
+          }`}
+        >
+          <i className="fa-solid fa-user-shield text-sm"></i>
+          <span>Profil Saya &amp; Keamanan</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveSettingsTab('tools')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap cursor-pointer ${
+            activeSettingsTab === 'tools'
+              ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60'
+          }`}
+        >
+          <i className="fa-solid fa-screwdriver-wrench text-sm"></i>
+          <span>Alat Database &amp; Duplikasi</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveSettingsTab('smtp')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap cursor-pointer ${
+            activeSettingsTab === 'smtp'
+              ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60'
+          }`}
+        >
+          <i className="fa-solid fa-envelope-circle-check text-sm"></i>
+          <span>Server Email SMTP</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveSettingsTab('logs')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap cursor-pointer ${
+            activeSettingsTab === 'logs'
+              ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60'
+          }`}
+        >
+          <i className="fa-solid fa-clock-rotate-left text-sm"></i>
+          <span>Audit Log Aktivitas</span>
+          <span className={`ml-1 px-1.5 py-0.2 rounded-full text-[10px] font-extrabold ${
+            activeSettingsTab === 'logs' ? 'bg-slate-950/20 text-slate-950' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+          }`}>
+            {activityLogs.length}
+          </span>
+        </button>
+      </div>
+
+      {/* TAB 1: MASTER DATA AKUN USER & HAK AKSES */}
+      {activeSettingsTab === 'master_users' && (
+        <MasterUsersManagement
+          currentUser={currentUser}
+          onRefreshSession={(updated) => {
+            const refreshed: UserSession = {
+              ...currentUser,
+              name: updated.name,
+              role: updated.role,
+              department: updated.department,
+              divisi: updated.divisi,
+              scopeType: updated.scopeType,
+              scopeValue: updated.scopeValue,
+              status: updated.status,
+              email: updated.email,
+              phone: updated.phone,
+              nik: updated.nik,
+              bio: updated.bio,
+              avatarUrl: updated.avatarUrl
+            };
+            saveStoredSession(refreshed);
+            if (onUpdateCurrentUser) onUpdateCurrentUser(refreshed);
+          }}
+          onShowToast={(msg) => {
+            setExportToast(msg);
+            setTimeout(() => setExportToast(null), 4000);
+          }}
+        />
+      )}
+
+      {/* TAB 2: PROFIL SAYA & GANTI PASSWORD */}
+      {activeSettingsTab === 'profile' && (
+        <div className="space-y-6">
+          {/* ROW 0: PROFIL ADMINISTRATOR UTAMA */}
+          <div className="card-elegant p-6 relative overflow-hidden">
         <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-6 pb-5 border-b border-slate-100 dark:border-slate-800">
           <div className="flex items-start gap-4">
             <div className="relative group shrink-0">
@@ -1133,8 +1248,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </div>
       </div>
+    </div>
+  )}
 
-      {/* ROW 1.5: DATABASE SISTEM & MANAJEMEN AKUN PENGGUNA TERPUSAT */}
+  {/* TAB 3: ALAT DATABASE, DUPLIKASI & SINKRONISASI */}
+  {activeSettingsTab === 'tools' && (
+    <div className="space-y-6">
+      {/* ROW 1.5: DATABASE SISTEM & BACKUP / RESTORE */}
       <div className="card-elegant p-6 border border-indigo-500/30 bg-gradient-to-br from-white via-white to-indigo-50/20 dark:from-slate-900 dark:via-slate-900 dark:to-indigo-950/20 space-y-5">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div>
@@ -1142,7 +1262,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <i className="fa-solid fa-database text-indigo-600 dark:text-indigo-400"></i> Dedicated User &amp; Profile Database
             </p>
             <h3 className="section-title text-base sm:text-lg mb-1 flex items-center gap-2 text-slate-900 dark:text-white">
-              Database Pengguna Khusus &amp; Manajemen Akun
+              Database Pengguna Khusus &amp; Backup / Restore
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400 max-w-3xl leading-relaxed">
               Database pengguna kini terisolasi secara mandiri dalam file <code className="font-mono px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-semibold">server/data/users_db.json</code>. Menyimpan seluruh akun, foto profil HD, dan kredensial login dengan mekanisme penulisan atomik tanpa bergantung pada log operasional sistem.
@@ -1739,7 +1859,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </div>
       </div>
+    </div>
+  )}
 
+  {/* TAB 4: PENGATURAN SERVER EMAIL LANGSUNG & SMTP */}
+  {activeSettingsTab === 'smtp' && (
+    <div className="space-y-6">
       {/* ROW 4: PENGATURAN SERVER EMAIL LANGSUNG & SMTP */}
       <div className="card-elegant p-6 border border-indigo-500/30 bg-gradient-to-br from-white via-white to-indigo-50/20 dark:from-slate-900 dark:via-slate-900 dark:to-indigo-950/20 space-y-4">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
@@ -1919,6 +2044,88 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </form>
       </div>
+    </div>
+  )}
+
+  {/* TAB 5: AUDIT LOG AKTIVITAS SISTEM */}
+  {activeSettingsTab === 'logs' && (
+    <div className="space-y-6">
+      <div className="card-elegant p-6 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100 dark:border-slate-800">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="w-8 h-8 rounded-xl bg-indigo-50 dark:bg-indigo-950/70 text-indigo-600 dark:text-indigo-400 flex items-center justify-center text-sm font-bold shadow-xs">
+                <i className="fa-solid fa-clock-rotate-left"></i>
+              </span>
+              <h3 className="section-title text-base sm:text-lg text-slate-900 dark:text-white">
+                Audit Trail &amp; Log Aktivitas Server
+              </h3>
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+              Catatan riwayat seluruh aktivitas akun, login, sinkronisasi, dan perubahan data matriks skill.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold font-mono">
+              Total {activityLogs.length} Aktivitas
+            </span>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto rounded-2xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 text-[10.5px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider sticky top-0">
+              <tr>
+                <th className="py-3 px-4">Waktu</th>
+                <th className="py-3 px-4">Pengguna</th>
+                <th className="py-3 px-4">Aksi</th>
+                <th className="py-3 px-4">Keterangan / Detail Aktivitas</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
+              {activityLogs.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="py-8 text-center text-slate-400 text-xs">
+                    Belum ada log aktivitas yang tercatat.
+                  </td>
+                </tr>
+              ) : (
+                activityLogs.map((log) => {
+                  const timeStr = new Date(log.timestamp).toLocaleString('id-ID', {
+                    day: '2-digit',
+                    month: 'short',
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit'
+                  });
+
+                  return (
+                    <tr key={log.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40">
+                      <td className="py-2.5 px-4 text-slate-400 font-mono text-[11px] whitespace-nowrap">{timeStr}</td>
+                      <td className="py-2.5 px-4 font-bold text-slate-800 dark:text-slate-200 whitespace-nowrap flex items-center gap-1.5">
+                        <span className="w-5 h-5 rounded-full bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 flex items-center justify-center text-[10px]">
+                          {log.username.charAt(0).toUpperCase()}
+                        </span>
+                        <span>{log.username}</span>
+                      </td>
+                      <td className="py-2.5 px-4 whitespace-nowrap">
+                        <span className="px-2 py-0.5 rounded-md text-[10.5px] font-bold bg-indigo-50 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                          {log.action}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-4 text-slate-600 dark:text-slate-300 leading-relaxed font-sans">{log.details}</td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  )}
 
       {/* ================= MODAL: PREVIEW & EXPORT LAPORAN PDF RESMI (GAS FORMAT) ================= */}
       <ExportPdfModal

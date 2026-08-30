@@ -152,11 +152,17 @@ export async function syncSystemFromBackend(): Promise<{ users: UserAccount[]; c
           name: targetUser.name || 'Mahmud Nurdiansyah',
           role: targetUser.role || 'HR Development Admin',
           department: targetUser.department || 'Human Resources Development',
+          divisi: targetUser.divisi || '',
+          scopeType: targetUser.scopeType || 'ALL',
+          scopeValue: targetUser.scopeValue || '',
+          status: targetUser.status || 'ACTIVE',
           email: targetUser.email || 'mahmudnurdiansyah4@gmail.com',
           phone: targetUser.phone || '0819-1932-7912',
           nik: targetUser.nik || '122108091',
           avatarUrl: targetUser.avatarUrl || '',
           bio: targetUser.bio || 'Administrator Multi-Skill Monitoring & Pengembangan Kompetensi Karyawan PT Ajinomoto Indonesia Mojokerto Factory.',
+          canEditCompetency: targetUser.canEditCompetency !== undefined ? targetUser.canEditCompetency : true,
+          canManageUsers: targetUser.canManageUsers !== undefined ? targetUser.canManageUsers : (targetUser.username === 'hr_admin'),
           token: currentSession?.token || 'tok_admin_' + Date.now()
         };
         saveStoredSession(refreshedSession);
@@ -258,16 +264,26 @@ export function checkLogin(username: string, password: string): { success: boole
     return { success: false, message: 'Username atau password salah. Silakan coba lagi.' };
   }
 
+  if (user.status === 'INACTIVE') {
+    return { success: false, message: 'Akun ini berstatus non-aktif. Silakan hubungi Super Administrator HRD.' };
+  }
+
   const session: UserSession = {
     username: user.username,
     name: user.name,
     role: user.role,
     department: user.department,
-    email: user.email || 'mahmudnurdiansyah4@gmail.com',
-    phone: user.phone || '0819-1932-7912',
-    nik: user.nik || '122108091',
+    divisi: user.divisi || '',
+    scopeType: user.scopeType || 'ALL',
+    scopeValue: user.scopeValue || '',
+    status: user.status || 'ACTIVE',
+    email: user.email || '',
+    phone: user.phone || '',
+    nik: user.nik || '',
     avatarUrl: user.avatarUrl || '',
-    bio: user.bio || 'Administrator Multi-Skill Monitoring & Pengembangan Kompetensi Karyawan PT Ajinomoto Indonesia Mojokerto Factory.',
+    bio: user.bio || '',
+    canEditCompetency: user.canEditCompetency !== undefined ? user.canEditCompetency : true,
+    canManageUsers: user.canManageUsers !== undefined ? user.canManageUsers : (user.username === 'hr_admin'),
     token: 'tok_' + Math.random().toString(36).substring(2) + Date.now().toString(36)
   };
 

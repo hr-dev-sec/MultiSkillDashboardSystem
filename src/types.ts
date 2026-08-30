@@ -35,17 +35,25 @@ export interface Employee {
   skills: Record<string, boolean>;
 }
 
+export type UserScopeType = 'ALL' | 'DIVISI' | 'DEPARTMENT' | 'PIC';
+
 export interface UserSession {
   username: string;
   name: string;
   role: string;
   department: string;
+  divisi?: string;
+  scopeType?: UserScopeType;
+  scopeValue?: string;
+  status?: 'ACTIVE' | 'INACTIVE';
   email?: string;
   phone?: string;
   nik?: string;
   avatarUrl?: string;
   bio?: string;
   token?: string;
+  canEditCompetency?: boolean;
+  canManageUsers?: boolean;
 }
 
 export interface UserAccount {
@@ -54,6 +62,10 @@ export interface UserAccount {
   name: string;
   role: string;
   department: string;
+  divisi?: string;
+  scopeType?: UserScopeType;
+  scopeValue?: string;
+  status?: 'ACTIVE' | 'INACTIVE';
   email?: string;
   phone?: string;
   nik?: string;
@@ -63,6 +75,8 @@ export interface UserAccount {
   createdAt?: string;
   updatedAt?: string;
   lastLogin?: string;
+  canEditCompetency?: boolean;
+  canManageUsers?: boolean;
 }
 
 export interface ActivityLog {

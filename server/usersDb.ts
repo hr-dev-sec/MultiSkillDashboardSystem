@@ -17,6 +17,10 @@ export interface UserAccountRecord {
   name: string;
   role: string;
   department: string;
+  divisi?: string;
+  scopeType?: 'ALL' | 'DIVISI' | 'DEPARTMENT' | 'PIC';
+  scopeValue?: string;
+  status?: 'ACTIVE' | 'INACTIVE';
   email?: string;
   phone?: string;
   nik?: string;
@@ -26,6 +30,8 @@ export interface UserAccountRecord {
   createdAt: string;
   updatedAt: string;
   lastLogin?: string;
+  canEditCompetency?: boolean;
+  canManageUsers?: boolean;
 }
 
 export interface UsersDatabaseSchema {
@@ -37,9 +43,9 @@ export interface UsersDatabaseSchema {
 }
 
 const DEFAULT_INITIAL_USERS_DB: UsersDatabaseSchema = {
-  version: '2.0',
-  databaseName: 'PT Ajinomoto Indonesia - User Accounts & Authentication Database',
-  description: 'Dedicated database storage for system administrators, user profiles, credentials, and digital signatures.',
+  version: '2.5',
+  databaseName: 'PT Ajinomoto Indonesia - User Accounts & Authentication Master Database',
+  description: 'Dedicated database storage for system administrators, user profiles, departmental credentials, access scopes, and digital signatures.',
   lastUpdated: new Date().toISOString(),
   users: [
     {
@@ -48,13 +54,117 @@ const DEFAULT_INITIAL_USERS_DB: UsersDatabaseSchema = {
       name: 'Mahmud Nurdiansyah',
       role: 'HR Development Admin',
       department: 'Human Resources Development',
+      divisi: 'Human Resources & Corporate Service',
+      scopeType: 'ALL',
+      status: 'ACTIVE',
       email: 'mahmudnurdiansyah4@gmail.com',
       phone: '0819-1932-7912',
       nik: '122108091',
       avatarUrl: '',
-      bio: 'Administrator Multi-Skill Monitoring & Pengembangan Kompetensi Karyawan PT Ajinomoto Indonesia Mojokerto Factory.',
+      bio: 'Super Administrator Multi-Skill Monitoring & Pengembangan Kompetensi Karyawan PT Ajinomoto Indonesia Mojokerto Factory.',
       createdAt: '2026-01-01T00:00:00.000Z',
-      updatedAt: new Date().toISOString()
+      updatedAt: new Date().toISOString(),
+      canEditCompetency: true,
+      canManageUsers: true
+    },
+    {
+      username: 'fermentasi_pic',
+      password: 'fermentasi123',
+      name: 'Budi Santoso, S.T.',
+      role: 'PIC Departemen Fermentasi',
+      department: 'Fermentation Department',
+      divisi: 'Production FI (MSG)',
+      scopeType: 'DEPARTMENT',
+      scopeValue: 'Fermentation Department',
+      status: 'ACTIVE',
+      email: 'budi.santoso@ajinomoto.co.id',
+      phone: '0812-3456-7890',
+      nik: '121904102',
+      avatarUrl: '',
+      bio: 'Person-in-Charge Pemantauan & Evaluasi Matriks Multi-Skill Karyawan Bagian Proses Fermentasi MSG.',
+      createdAt: '2026-01-15T00:00:00.000Z',
+      updatedAt: new Date().toISOString(),
+      canEditCompetency: true,
+      canManageUsers: false
+    },
+    {
+      username: 'packaging_pic',
+      password: 'packaging123',
+      name: 'Siti Rahmawati',
+      role: 'PIC Packaging & Filling',
+      department: 'Packaging Department',
+      divisi: 'Production FP (Food Products)',
+      scopeType: 'DEPARTMENT',
+      scopeValue: 'Packaging Department',
+      status: 'ACTIVE',
+      email: 'siti.rahmawati@ajinomoto.co.id',
+      phone: '0813-9876-5432',
+      nik: '122005214',
+      avatarUrl: '',
+      bio: 'Supervisor & PIC Multi-Skill Pemantauan Keahlian Packaging & Filling Food Products Mojokerto Factory.',
+      createdAt: '2026-01-15T00:00:00.000Z',
+      updatedAt: new Date().toISOString(),
+      canEditCompetency: true,
+      canManageUsers: false
+    },
+    {
+      username: 'qa_pic',
+      password: 'qa123456',
+      name: 'Agus Setiawan, S.Si.',
+      role: 'Quality Assurance PIC',
+      department: 'Quality Assurance',
+      divisi: 'Technical & QA',
+      scopeType: 'DEPARTMENT',
+      scopeValue: 'Quality Assurance',
+      status: 'ACTIVE',
+      email: 'agus.setiawan@ajinomoto.co.id',
+      phone: '0815-6789-0123',
+      nik: '121803119',
+      avatarUrl: '',
+      bio: 'Penanggung Jawab Kompetensi Analis & Matriks Laboratorium Quality Assurance & Control.',
+      createdAt: '2026-02-01T00:00:00.000Z',
+      updatedAt: new Date().toISOString(),
+      canEditCompetency: true,
+      canManageUsers: false
+    },
+    {
+      username: 'eng_supervisor',
+      password: 'eng12345',
+      name: 'Hendra Wijaya',
+      role: 'Section Supervisor Maintenance',
+      department: 'Engineering & Maintenance',
+      divisi: 'Engineering & Utility',
+      scopeType: 'DEPARTMENT',
+      scopeValue: 'Engineering & Maintenance',
+      status: 'ACTIVE',
+      email: 'hendra.wijaya@ajinomoto.co.id',
+      phone: '0821-4567-8901',
+      nik: '121702088',
+      avatarUrl: '',
+      bio: 'Supervisor Divisi Pemeliharaan Mesin & Utilitas Pabrik Ajinomoto Mojokerto.',
+      createdAt: '2026-02-10T00:00:00.000Z',
+      updatedAt: new Date().toISOString(),
+      canEditCompetency: true,
+      canManageUsers: false
+    },
+    {
+      username: 'mgmt_viewer',
+      password: 'viewer123',
+      name: 'Ir. Haryono',
+      role: 'Executive Management Auditor',
+      department: 'Factory Executive Office',
+      divisi: 'Factory Management',
+      scopeType: 'ALL',
+      status: 'ACTIVE',
+      email: 'haryono.exec@ajinomoto.co.id',
+      phone: '0811-2233-4455',
+      nik: '119801001',
+      avatarUrl: '',
+      bio: 'Pemantau Eksekutif KPI Matriks Multi-Skill dan Kesiapan Kompetensi Tenaga Kerja Pabrik.',
+      createdAt: '2026-02-15T00:00:00.000Z',
+      updatedAt: new Date().toISOString(),
+      canEditCompetency: false,
+      canManageUsers: false
     }
   ]
 };
@@ -64,7 +174,7 @@ let inMemoryUsersDb: UsersDatabaseSchema | null = null;
 
 /**
  * Initialize and ensure dedicated users database exists on disk.
- * Migrates existing user records from legacy system_db.json if available.
+ * Migrates and enriches user records with master account database templates.
  */
 export function initUsersDatabase(): UsersDatabaseSchema {
   try {
@@ -73,30 +183,6 @@ export function initUsersDatabase(): UsersDatabaseSchema {
     }
 
     if (!fs.existsSync(USERS_DB_FILE_PATH)) {
-      // Check if legacy system_db.json has existing users to migrate seamlessly
-      if (fs.existsSync(LEGACY_SYSTEM_DB_FILE_PATH)) {
-        try {
-          const rawLegacy = fs.readFileSync(LEGACY_SYSTEM_DB_FILE_PATH, 'utf-8');
-          const parsedLegacy = JSON.parse(rawLegacy);
-          if (parsedLegacy && Array.isArray(parsedLegacy.users) && parsedLegacy.users.length > 0) {
-            const migratedDb: UsersDatabaseSchema = {
-              version: '2.0',
-              databaseName: 'PT Ajinomoto Indonesia - User Accounts & Authentication Database',
-              description: 'Dedicated database storage for system administrators, user profiles, credentials, and digital signatures.',
-              lastUpdated: new Date().toISOString(),
-              users: parsedLegacy.users
-            };
-            fs.writeFileSync(USERS_DB_FILE_PATH, JSON.stringify(migratedDb, null, 2), 'utf-8');
-            inMemoryUsersDb = migratedDb;
-            console.log(`[UserDB] Migrated ${migratedDb.users.length} users into dedicated database: ${USERS_DB_FILE_PATH}`);
-            return inMemoryUsersDb;
-          }
-        } catch (migErr) {
-          console.warn('[UserDB] Could not migrate legacy users, creating default user db:', migErr);
-        }
-      }
-
-      // If no legacy or migration failed, write default
       fs.writeFileSync(USERS_DB_FILE_PATH, JSON.stringify(DEFAULT_INITIAL_USERS_DB, null, 2), 'utf-8');
       inMemoryUsersDb = JSON.parse(JSON.stringify(DEFAULT_INITIAL_USERS_DB));
       console.log(`[UserDB] Initialized dedicated users database: ${USERS_DB_FILE_PATH}`);
@@ -108,6 +194,38 @@ export function initUsersDatabase(): UsersDatabaseSchema {
 
     if (!parsed.users || !Array.isArray(parsed.users) || parsed.users.length === 0) {
       parsed.users = DEFAULT_INITIAL_USERS_DB.users;
+      persistUsersDatabase(parsed);
+    } else {
+      // Ensure all default master accounts are present
+      let needsSave = false;
+      for (const defaultUser of DEFAULT_INITIAL_USERS_DB.users) {
+        const existingIdx = parsed.users.findIndex(
+          (u) => u.username.toLowerCase() === defaultUser.username.toLowerCase()
+        );
+        if (existingIdx === -1) {
+          parsed.users.push(defaultUser);
+          needsSave = true;
+        } else {
+          // Enrich missing fields if any
+          const current = parsed.users[existingIdx];
+          if (!current.divisi || !current.scopeType || !current.status) {
+            parsed.users[existingIdx] = {
+              ...defaultUser,
+              ...current,
+              divisi: current.divisi || defaultUser.divisi,
+              scopeType: current.scopeType || defaultUser.scopeType,
+              scopeValue: current.scopeValue || defaultUser.scopeValue,
+              status: current.status || defaultUser.status,
+              canEditCompetency: current.canEditCompetency !== undefined ? current.canEditCompetency : defaultUser.canEditCompetency,
+              canManageUsers: current.canManageUsers !== undefined ? current.canManageUsers : defaultUser.canManageUsers
+            };
+            needsSave = true;
+          }
+        }
+      }
+      if (needsSave) {
+        persistUsersDatabase(parsed);
+      }
     }
 
     inMemoryUsersDb = parsed;
@@ -216,14 +334,129 @@ export function authenticateUser(
   );
 
   if (!user) {
-    return { success: false, message: 'Username atau password salah. Silakan periksa kembali.' };
+    return { success: false, message: 'Username atau kata sandi salah. Silakan periksa kembali.' };
+  }
+
+  if (user.status === 'INACTIVE') {
+    return {
+      success: false,
+      message: 'Akun ini berstatus non-aktif. Silakan hubungi Super Administrator HRD untuk aktivasi kembali.'
+    };
   }
 
   user.lastLogin = new Date().toISOString();
-  addActivityLog(user.username, 'LOGIN_SUCCESS', `Login berhasil ke sistem dari ${user.role} (${user.department})`, ip);
+  addActivityLog(user.username, 'LOGIN_SUCCESS', `Login berhasil ke sistem dari ${user.role} (${user.department}) - Scope: ${user.scopeType || 'ALL'}`, ip);
   persistUsersDatabase(db);
 
   return { success: true, user };
+}
+
+/**
+ * Admin: Full Update of any user account
+ */
+export function adminUpdateUser(
+  targetUsername: string,
+  updates: Partial<UserAccountRecord> & { newPassword?: string },
+  operatorUsername: string = 'hr_admin',
+  ip?: string
+): { success: boolean; message: string; user?: UserAccountRecord } {
+  const db = getUsersDatabase();
+  const cleanTarget = (targetUsername || '').trim().toLowerCase();
+
+  const index = db.users.findIndex(
+    (u) => u.username.trim().toLowerCase() === cleanTarget
+  );
+
+  if (index === -1) {
+    return { success: false, message: `Akun "${targetUsername}" tidak ditemukan di database.` };
+  }
+
+  const current = db.users[index];
+
+  // If changing username, check uniqueness
+  if (updates.username && updates.username.trim().toLowerCase() !== current.username.trim().toLowerCase()) {
+    const isTaken = db.users.some(
+      (u, idx) => idx !== index && u.username.trim().toLowerCase() === updates.username!.trim().toLowerCase()
+    );
+    if (isTaken) {
+      return { success: false, message: `Username "${updates.username}" sudah digunakan oleh akun lain.` };
+    }
+  }
+
+  const updatedUser: UserAccountRecord = {
+    ...current,
+    ...updates,
+    username: updates.username?.trim() || current.username,
+    name: updates.name?.trim() || current.name,
+    role: updates.role?.trim() || current.role,
+    department: updates.department?.trim() || current.department,
+    divisi: updates.divisi !== undefined ? updates.divisi : current.divisi,
+    scopeType: updates.scopeType || current.scopeType || 'ALL',
+    scopeValue: updates.scopeValue !== undefined ? updates.scopeValue : current.scopeValue,
+    status: updates.status || current.status || 'ACTIVE',
+    email: updates.email !== undefined ? updates.email : current.email,
+    phone: updates.phone !== undefined ? updates.phone : current.phone,
+    nik: updates.nik !== undefined ? updates.nik : current.nik,
+    bio: updates.bio !== undefined ? updates.bio : current.bio,
+    avatarUrl: updates.avatarUrl !== undefined ? updates.avatarUrl : current.avatarUrl,
+    canEditCompetency: updates.canEditCompetency !== undefined ? updates.canEditCompetency : current.canEditCompetency,
+    canManageUsers: updates.canManageUsers !== undefined ? updates.canManageUsers : current.canManageUsers,
+    password: updates.newPassword && updates.newPassword.trim().length >= 6 ? updates.newPassword.trim() : (updates.password || current.password),
+    updatedAt: new Date().toISOString()
+  };
+
+  db.users[index] = updatedUser;
+  addActivityLog(
+    operatorUsername,
+    'PROFILE_UPDATED',
+    `Administrator ${operatorUsername} memperbarui akun: ${updatedUser.username} (${updatedUser.name} - ${updatedUser.role})`,
+    ip
+  );
+  persistUsersDatabase(db);
+
+  return {
+    success: true,
+    message: `Data akun ${updatedUser.name} (@${updatedUser.username}) berhasil diperbarui di database master.`,
+    user: updatedUser
+  };
+}
+
+/**
+ * Admin: Reset user password directly
+ */
+export function adminResetUserPassword(
+  targetUsername: string,
+  newPw: string,
+  operatorUsername: string = 'hr_admin',
+  ip?: string
+): { success: boolean; message: string } {
+  const db = getUsersDatabase();
+  const cleanTarget = (targetUsername || '').trim().toLowerCase();
+
+  const index = db.users.findIndex(
+    (u) => u.username.trim().toLowerCase() === cleanTarget
+  );
+
+  if (index === -1) {
+    return { success: false, message: `Akun "${targetUsername}" tidak ditemukan di database.` };
+  }
+
+  if (!newPw || newPw.length < 6) {
+    return { success: false, message: 'Kata sandi baru minimal 6 karakter.' };
+  }
+
+  db.users[index].password = newPw;
+  db.users[index].updatedAt = new Date().toISOString();
+
+  addActivityLog(
+    operatorUsername,
+    'PASSWORD_CHANGED',
+    `Administrator ${operatorUsername} mereset kata sandi akun @${targetUsername}`,
+    ip
+  );
+  persistUsersDatabase(db);
+
+  return { success: true, message: `Kata sandi akun @${targetUsername} berhasil direset.` };
 }
 
 /**
