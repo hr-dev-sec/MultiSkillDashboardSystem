@@ -27,14 +27,21 @@ import {
   resetUsersDatabaseToDefault
 } from './server/systemDb.js';
 import { initUsersDatabase, getUsersDatabase } from './server/usersDb.js';
+import {
+  initEmployeesDatabase,
+  getEmployeesDatabase,
+  persistEmployeesDatabase,
+  getAllEmployees
+} from './server/employeeDb.js';
 
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Initialize Dedicated Users Database & System Database on startup
+// Initialize Dedicated Users Database, Employee Database & System Database on startup
 initUsersDatabase();
+initEmployeesDatabase();
 initSystemDatabase();
 
 async function startServer() {
@@ -176,6 +183,115 @@ async function startServer() {
       res.send(jsonStr);
     } catch (err: any) {
       res.status(500).json({ success: false, message: 'Gagal mengekspor database pengguna.' });
+    }
+  });
+
+  // =========================================================================
+  // API ROUTE: COMPLETE MULTI-SKILL SYSTEM BACKUP & EXPORT
+  // =========================================================================
+  app.get('/api/system/database/export', (req, res) => {
+    try {
+      const usersDb = getUsersDatabase();
+      const sysDb = getSystemDatabase();
+      const empDb = getEmployeesDatabase();
+
+      const fullBackupPayload = {
+        system: 'PT Ajinomoto Indonesia - Multi-Skill Monitoring System (Complete Persistent Backup)',
+        version: '2.5',
+        exportDate: new Date().toISOString(),
+        factory: 'Mojokerto Plant',
+        stats: {
+          totalEmployees: empDb.employees.length,
+          totalUsers: usersDb.users.length,
+          activeSuperAdmin: usersDb.users[0]?.username || 'hr_admin'
+        },
+        usersDatabase: usersDb,
+        employees: empDb.employees,
+        config: sysDb.config,
+        activityLogs: sysDb.activityLogs.slice(0, 100),
+        emailLogs: sysDb.emailLogs.slice(0, 100)
+      };
+
+      const jsonStr = JSON.stringify(fullBackupPayload, null, 2);
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Content-Disposition', `attachment; filename="ajinomoto_full_system_database_${Date.now()}.json"`);
+      res.send(jsonStr);
+    } catch (err: any) {
+      console.error('System export error:', err);
+      res.status(500).json({ success: false, message: 'Gagal mengekspor cadangan database sistem lengkap.' });
+    }
+  });
+
+  app.post('/api/system/database/export-full', (req, res) => {
+    try {
+      const { clientEmployees = [], clientUsers = [], clientConfig = {} } = req.body || {};
+      const usersDb = getUsersDatabase();
+      const sysDb = getSystemDatabase();
+      const serverEmployees = getAllEmployees();
+
+      const mergedEmployees = clientEmployees.length > 0 ? clientEmployees : serverEmployees;
+      const mergedUsers = usersDb.users.length > 0 ? usersDb.users : clientUsers;
+
+      const fullBackupPayload = {
+        system: 'PT Ajinomoto Indonesia - Multi-Skill Monitoring System (Comprehensive Backup)',
+        version: '2.5',
+        exportDate: new Date().toISOString(),
+        factory: 'Mojokerto Plant',
+        stats: {
+          totalEmployees: mergedEmployees.length,
+          totalUsers: mergedUsers.length,
+          activeSuperAdmin: mergedUsers[0]?.username || 'hr_admin'
+        },
+        usersDatabase: usersDb,
+        users: mergedUsers,
+        employees: mergedEmployees,
+        config: { ...sysDb.config, ...clientConfig }
+      };
+
+      const jsonStr = JSON.stringify(fullBackupPayload, null, 2);
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Content-Disposition', `attachment; filename="ajinomoto_full_system_backup_${Date.now()}.json"`);
+      res.send(jsonStr);
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: 'Gagal memproses cadangan sistem lengkap.' });
+    }
+  });
+
+  // =========================================================================
+  // API ROUTE: EMPLOYEE DATA PERSISTENCE ON SERVER
+  // =========================================================================
+  app.get('/api/employees', (req, res) => {
+    try {
+      const employees = getAllEmployees();
+      res.json({
+        success: true,
+        count: employees.length,
+        employees
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: 'Gagal memuat data karyawan dari server.' });
+    }
+  });
+
+  app.put('/api/employees', (req, res) => {
+    try {
+      const { employees = [] } = req.body || {};
+      if (!Array.isArray(employees)) {
+        return res.status(400).json({ success: false, message: 'Data karyawan harus berupa array.' });
+      }
+
+      const success = persistEmployeesDatabase(employees);
+      if (success) {
+        return res.json({
+          success: true,
+          message: `Berhasil menyimpan ${employees.length} data karyawan di database server.`,
+          count: employees.length
+        });
+      } else {
+        return res.status(500).json({ success: false, message: 'Gagal menyimpan data karyawan ke disk server.' });
+      }
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: 'Gagal memproses penyimpanan data karyawan.' });
     }
   });
 

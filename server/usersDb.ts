@@ -147,6 +147,15 @@ export function getUsersDatabase(): UsersDatabaseSchema {
   if (!inMemoryUsersDb) {
     return initUsersDatabase();
   }
+  try {
+    if (fs.existsSync(USERS_DB_FILE_PATH)) {
+      const raw = fs.readFileSync(USERS_DB_FILE_PATH, 'utf-8');
+      const parsed: UsersDatabaseSchema = JSON.parse(raw);
+      if (parsed && Array.isArray(parsed.users) && parsed.users.length > 0) {
+        inMemoryUsersDb = parsed;
+      }
+    }
+  } catch (_) {}
   return inMemoryUsersDb;
 }
 

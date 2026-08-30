@@ -27,7 +27,9 @@ import {
   fetchSystemInit,
   serverLogin,
   updateServerUserProfile,
-  serverChangePassword
+  serverChangePassword,
+  saveEmployeesToServer,
+  fetchEmployeesFromServer
 } from './systemDbService';
 
 export { calculateEmployeeScore };
@@ -94,6 +96,8 @@ export function getStoredEmployees(): Employee[] {
 export function saveStoredEmployees(employees: Employee[]): void {
   try {
     localStorage.setItem(STORAGE_KEYS.EMPLOYEES, JSON.stringify(employees));
+    // Asynchronously synchronize employees to persistent server disk
+    saveEmployeesToServer(employees).catch(() => {});
   } catch (err) {
     console.error('Error saving employees:', err);
   }
@@ -128,7 +132,7 @@ export function saveStoredUsers(users: UserAccount[]): void {
 
 /**
  * Synchronize users and system settings from Server Database.
- * Runs on boot and on demand.
+ * Runs on boot and on demand to guarantee instant cross-incognito profile restoration.
  */
 export async function syncSystemFromBackend(): Promise<{ users: UserAccount[]; config?: SystemConfig } | null> {
   try {
@@ -140,7 +144,7 @@ export async function syncSystemFromBackend(): Promise<{ users: UserAccount[]; c
       const currentSession = getStoredSession();
       const targetUser = currentSession?.username
         ? initData.users.find((u) => u.username.trim().toLowerCase() === currentSession.username.trim().toLowerCase())
-        : initData.users[0];
+        : (initData.users.find((u) => u.username.trim().toLowerCase() === 'hr_admin') || initData.users[0]);
 
       if (targetUser) {
         const refreshedSession: UserSession = {

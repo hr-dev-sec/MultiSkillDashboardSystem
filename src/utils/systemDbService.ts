@@ -403,47 +403,90 @@ export async function fetchUserDatabaseInfo(): Promise<{
 }
 
 /**
+ * Helper to safely trigger file download across different browser contexts & iframes
+ */
+export function triggerFileDownload(content: string, fileName: string, mimeType: string = 'application/json'): boolean {
+  try {
+    const blob = new Blob([content], { type: `${mimeType};charset=utf-8` });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName;
+    link.setAttribute('download', fileName);
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    setTimeout(() => {
+      try {
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+      } catch (_) {}
+    }, 3000);
+    return true;
+  } catch (blobErr) {
+    console.warn('Blob URL download failed, falling back to data URI:', blobErr);
+    try {
+      const dataUri = `data:${mimeType};charset=utf-8,` + encodeURIComponent(content);
+      const link = document.createElement('a');
+      link.href = dataUri;
+      link.download = fileName;
+      link.setAttribute('download', fileName);
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      setTimeout(() => {
+        try {
+          document.body.removeChild(link);
+        } catch (_) {}
+      }, 3000);
+      return true;
+    } catch (uriErr) {
+      console.error('All automatic download methods failed:', uriErr);
+      return false;
+    }
+  }
+}
+
+/**
+ * Get dedicated users database JSON text for backup / clipboard
+ */
+export async function getUsersDatabaseBackupText(): Promise<string> {
+  let jsonText = '';
+  try {
+    const res = await fetch('/api/users/database/export');
+    if (res.ok) {
+      jsonText = await res.text();
+    }
+  } catch (_) {}
+
+  if (!jsonText || jsonText.trim().length === 0) {
+    let localUsers = [];
+    let localSession = null;
+    try {
+      localUsers = JSON.parse(localStorage.getItem('msm_users_v2') || '[]');
+      localSession = JSON.parse(localStorage.getItem('msm_session_v2') || 'null');
+    } catch (_) {}
+
+    const exportPayload = {
+      version: '2.0',
+      databaseName: 'PT Ajinomoto Indonesia - User Accounts & Authentication Database (Backup)',
+      description: 'Dedicated database backup of system accounts, administrators, and credentials.',
+      lastUpdated: new Date().toISOString(),
+      users: Array.isArray(localUsers) && localUsers.length > 0 ? localUsers : (localSession ? [localSession] : [])
+    };
+    jsonText = JSON.stringify(exportPayload, null, 2);
+  }
+  return jsonText;
+}
+
+/**
  * Trigger download of dedicated users database JSON backup file
  */
 export async function downloadUsersDatabaseBackup(): Promise<boolean> {
   try {
-    let jsonText = '';
-    try {
-      const res = await fetch('/api/users/database/export');
-      if (res.ok) {
-        jsonText = await res.text();
-      }
-    } catch (_) {
-      // Server fetch failed, continue to fallback
-    }
-
-    if (!jsonText || jsonText.trim().length === 0) {
-      // Offline/fallback generation from client local data
-      const localUsers = JSON.parse(localStorage.getItem('msm_users_v2') || '[]');
-      const localSession = JSON.parse(localStorage.getItem('msm_session_v2') || 'null');
-      const exportPayload = {
-        version: '2.0',
-        databaseName: 'PT Ajinomoto Indonesia - User Accounts & Authentication Database (Backup)',
-        description: 'Dedicated database backup of system accounts, administrators, and credentials.',
-        lastUpdated: new Date().toISOString(),
-        users: Array.isArray(localUsers) && localUsers.length > 0 ? localUsers : (localSession ? [localSession] : [])
-      };
-      jsonText = JSON.stringify(exportPayload, null, 2);
-    }
-
-    const blob = new Blob([jsonText], { type: 'application/json;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `ajinomoto_users_db_backup_${new Date().toISOString().slice(0, 10)}.json`;
-    a.style.display = 'none';
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => {
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    }, 4000);
-    return true;
+    const jsonText = await getUsersDatabaseBackupText();
+    const fileName = `ajinomoto_users_db_backup_${new Date().toISOString().slice(0, 10)}.json`;
+    return triggerFileDownload(jsonText, fileName, 'application/json');
   } catch (err) {
     console.error('Failed to export users database:', err);
     return false;
@@ -451,15 +494,47 @@ export async function downloadUsersDatabaseBackup(): Promise<boolean> {
 }
 
 /**
- * Trigger download of complete Multi-Skill system database (Employees, Skills, Matrix, Config, and Users)
+ * Get complete full system backup JSON text
  */
-export function downloadFullSystemBackup(employees: any[]): boolean {
+export async function getFullSystemBackupText(employees: any[] = []): Promise<string> {
+  let jsonText = '';
   try {
-    const localUsers = JSON.parse(localStorage.getItem('msm_users_v2') || '[]');
-    const localSession = JSON.parse(localStorage.getItem('msm_session_v2') || 'null');
-    const localConfig = JSON.parse(localStorage.getItem('msm_system_config_v2') || '{}');
-    const localSmtp = JSON.parse(localStorage.getItem('msm_smtp_config_v2') || '{}');
-    const localSupabase = JSON.parse(localStorage.getItem('msm_supabase_config_v1') || '{}');
+    let localUsers = [];
+    let localSession = null;
+    let localConfig = {};
+    try {
+      localUsers = JSON.parse(localStorage.getItem('msm_users_v2') || '[]');
+      localSession = JSON.parse(localStorage.getItem('msm_session_v2') || 'null');
+      localConfig = JSON.parse(localStorage.getItem('msm_system_config_v2') || '{}');
+    } catch (_) {}
+
+    const res = await fetch('/api/system/database/export-full', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        clientEmployees: employees,
+        clientUsers: localUsers,
+        clientConfig: localConfig
+      })
+    });
+    if (res.ok) {
+      jsonText = await res.text();
+    }
+  } catch (_) {}
+
+  if (!jsonText || jsonText.trim().length === 0) {
+    let localUsers = [];
+    let localSession = null;
+    let localConfig = {};
+    let localSmtp = {};
+    let localSupabase = {};
+    try {
+      localUsers = JSON.parse(localStorage.getItem('msm_users_v2') || '[]');
+      localSession = JSON.parse(localStorage.getItem('msm_session_v2') || 'null');
+      localConfig = JSON.parse(localStorage.getItem('msm_system_config_v2') || '{}');
+      localSmtp = JSON.parse(localStorage.getItem('msm_smtp_config_v2') || '{}');
+      localSupabase = JSON.parse(localStorage.getItem('msm_supabase_config_v1') || '{}');
+    } catch (_) {}
 
     const fullDatabasePayload = {
       system: 'PT Ajinomoto Indonesia - Multi-Skill Monitoring System (Comprehensive Backup)',
@@ -469,7 +544,7 @@ export function downloadFullSystemBackup(employees: any[]): boolean {
       stats: {
         totalEmployees: employees.length,
         totalUsers: Array.isArray(localUsers) ? localUsers.length : 1,
-        activeExportUser: localSession?.username || 'hr_admin'
+        activeExportUser: (localSession as any)?.username || 'hr_admin'
       },
       employees,
       users: Array.isArray(localUsers) && localUsers.length > 0 ? localUsers : (localSession ? [localSession] : []),
@@ -477,27 +552,61 @@ export function downloadFullSystemBackup(employees: any[]): boolean {
       smtp: localSmtp,
       cloudSync: {
         googleSheetUrl: localStorage.getItem('msm_google_sheet_url_v2') || '',
-        hasSupabase: Boolean(localSupabase.url)
+        hasSupabase: Boolean((localSupabase as any)?.url)
       }
     };
+    jsonText = JSON.stringify(fullDatabasePayload, null, 2);
+  }
+  return jsonText;
+}
 
-    const jsonText = JSON.stringify(fullDatabasePayload, null, 2);
-    const blob = new Blob([jsonText], { type: 'application/json;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `ajinomoto_full_system_database_backup_${new Date().toISOString().slice(0, 10)}.json`;
-    a.style.display = 'none';
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => {
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    }, 4000);
-    return true;
+/**
+ * Trigger download of complete Multi-Skill system database (Employees, Skills, Matrix, Config, and Users)
+ */
+export async function downloadFullSystemBackup(employees: any[]): Promise<boolean> {
+  try {
+    const jsonText = await getFullSystemBackupText(employees);
+    const fileName = `ajinomoto_full_system_database_backup_${new Date().toISOString().slice(0, 10)}.json`;
+    return triggerFileDownload(jsonText, fileName, 'application/json');
   } catch (err) {
     console.error('Failed to export full system database:', err);
     return false;
+  }
+}
+
+/**
+ * Persist current employee dataset to Server Database (for cross-incognito recovery)
+ */
+export async function saveEmployeesToServer(employees: any[]): Promise<{ success: boolean; message: string }> {
+  try {
+    const res = await fetch('/api/employees', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ employees })
+    });
+    const { ok, data } = await safeParseJson<{ success: boolean; message: string }>(res, 'Gagal menyimpan ke server.');
+    if (ok && data) {
+      return data;
+    }
+    return { success: false, message: 'Gagal menghubungi database karyawan server.' };
+  } catch (err: any) {
+    return { success: false, message: err?.message || 'Koneksi ke server gagal.' };
+  }
+}
+
+/**
+ * Fetch persistent employee dataset from Server Database
+ */
+export async function fetchEmployeesFromServer(): Promise<any[] | null> {
+  try {
+    const res = await fetch('/api/employees');
+    const { ok, data } = await safeParseJson<{ success: boolean; employees: any[] }>(res, 'Gagal memuat dari server.');
+    if (ok && data?.success && Array.isArray(data.employees) && data.employees.length > 0) {
+      return data.employees;
+    }
+    return null;
+  } catch (err) {
+    return null;
   }
 }
 

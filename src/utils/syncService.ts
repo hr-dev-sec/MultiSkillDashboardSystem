@@ -1297,15 +1297,20 @@ export function getSupabaseSchemaDictionary(): SchemaFieldDoc[] {
 }
 
 // -------------------------------------------------------------
-// SQL Schema Generator for Supabase
+// Comprehensive SQL Schema Generator for Supabase (Full Database + Profiles + Config)
 // -------------------------------------------------------------
-export function generateSupabaseSqlTable(tableName: string = 'employees_multi_skill'): string {
-  return `-- ==========================================================
--- AJINOMOTO MULTI-SKILL SYSTEM - SUPABASE DATABASE SCHEMA
--- Jalankan query ini di menu 'SQL Editor' pada dashboard Supabase
--- ==========================================================
+export const generateSupabaseSqlTable = (tableName: string = 'employees_multi_skill'): string => {
+  return generateCompleteSupabaseSqlSchema(tableName);
+};
 
--- 1. Buat Tabel Multi-Skill Karyawan
+export function generateCompleteSupabaseSqlSchema(tableName: string = 'employees_multi_skill'): string {
+  return `-- =========================================================================
+-- PT AJINOMOTO INDONESIA - MOJOKERTO FACTORY
+-- COMPLETE SUPABASE / POSTGRESQL DATABASE INITIALIZATION SCHEMA
+-- Copy and paste all queries below into Supabase -> SQL Editor -> Run
+-- =========================================================================
+
+-- 1. TABEL UTAMA: DATA KARYAWAN & MATRIKS MULTI-SKILL (92+ KOMPETENSI)
 CREATE TABLE IF NOT EXISTS public.${tableName} (
     id BIGSERIAL PRIMARY KEY,
     emp_id VARCHAR(50) NOT NULL,
@@ -1321,7 +1326,7 @@ CREATE TABLE IF NOT EXISTS public.${tableName} (
     pic VARCHAR(150),
     tahun INTEGER NOT NULL DEFAULT EXTRACT(YEAR FROM CURRENT_DATE),
     bulan INTEGER NOT NULL DEFAULT EXTRACT(MONTH FROM CURRENT_DATE),
-    job_category TEXT,
+    job_category VARCHAR(50),
     total_score INTEGER DEFAULT 0,
     standard INTEGER,
     result VARCHAR(10),
@@ -1332,23 +1337,113 @@ CREATE TABLE IF NOT EXISTS public.${tableName} (
     CONSTRAINT unique_emp_period UNIQUE (emp_id, tahun, bulan)
 );
 
--- 2. Index Performa Tinggi untuk Pencarian & Filter Cepat
+-- Index Performa Tinggi untuk Kueri Cepat
 CREATE INDEX IF NOT EXISTS idx_${tableName}_period ON public.${tableName} (tahun, bulan);
 CREATE INDEX IF NOT EXISTS idx_${tableName}_div_dept ON public.${tableName} (divisi, department);
 CREATE INDEX IF NOT EXISTS idx_${tableName}_emp_id ON public.${tableName} (emp_id);
 CREATE INDEX IF NOT EXISTS idx_${tableName}_result ON public.${tableName} (result);
 CREATE INDEX IF NOT EXISTS idx_${tableName}_skills_gin ON public.${tableName} USING gin (skills);
 
--- 3. Aktifkan Row Level Security (RLS) & Berikan Izin Akses Anon / Auth
+-- 2. TABEL AKUN PENGGUNA, PROFIL HR ADMIN & FOTO AVATAR
+CREATE TABLE IF NOT EXISTS public.users_accounts (
+    id BIGSERIAL PRIMARY KEY,
+    username VARCHAR(100) UNIQUE NOT NULL,
+    password VARCHAR(255) NOT NULL,
+    name VARCHAR(150) NOT NULL,
+    role VARCHAR(100) NOT NULL DEFAULT 'HR Development Admin',
+    department VARCHAR(150) DEFAULT 'Human Resources Development',
+    email VARCHAR(150) DEFAULT 'mahmudnurdiansyah4@gmail.com',
+    phone VARCHAR(50) DEFAULT '0819-1932-7912',
+    nik VARCHAR(50) DEFAULT '122108091',
+    avatar_url TEXT DEFAULT '',
+    bio TEXT DEFAULT 'Administrator Multi-Skill Monitoring & Pengembangan Kompetensi Karyawan PT Ajinomoto Indonesia Mojokerto Factory.',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Seed Akun Default Super Admin HR Development
+INSERT INTO public.users_accounts (username, password, name, role, department, email, phone, nik, bio)
+VALUES (
+    'hr_admin',
+    'password123',
+    'Mahmud Nurdiansyah',
+    'HR Development Admin',
+    'Human Resources Development',
+    'mahmudnurdiansyah4@gmail.com',
+    '0819-1932-7912',
+    '122108091',
+    'Administrator Multi-Skill Monitoring & Pengembangan Kompetensi Karyawan PT Ajinomoto Indonesia Mojokerto Factory.'
+)
+ON CONFLICT (username) DO UPDATE SET
+    name = EXCLUDED.name,
+    nik = EXCLUDED.nik,
+    phone = EXCLUDED.phone,
+    email = EXCLUDED.email,
+    updated_at = NOW();
+
+-- 3. TABEL KONFIGURASI SISTEM, SMTP EMAIL & APPROVAL E-SIGN
+CREATE TABLE IF NOT EXISTS public.system_config (
+    id VARCHAR(50) PRIMARY KEY DEFAULT 'global_config',
+    google_sheet_url TEXT DEFAULT '',
+    esign_dept_manager_name VARCHAR(150) DEFAULT 'Mahmud Nurdiansyah',
+    esign_dept_manager_nik VARCHAR(50) DEFAULT '122108091',
+    esign_dept_manager_title VARCHAR(150) DEFAULT 'HR Development Department Manager',
+    esign_factory_manager_name VARCHAR(150) DEFAULT 'Ir. Bambang Wijaya, M.M.',
+    esign_factory_manager_title VARCHAR(150) DEFAULT 'Mojokerto Factory General Manager',
+    threshold_dept_mgr INTEGER DEFAULT 4,
+    threshold_asm_sm INTEGER DEFAULT 3,
+    threshold_ll_foreman INTEGER DEFAULT 2,
+    target_percent_dept_mgr NUMERIC DEFAULT 0.30,
+    target_percent_asm_sm NUMERIC DEFAULT 0.30,
+    target_percent_ll_foreman NUMERIC DEFAULT 0.30,
+    smtp_host VARCHAR(150) DEFAULT 'smtp.gmail.com',
+    smtp_port INTEGER DEFAULT 587,
+    smtp_secure BOOLEAN DEFAULT false,
+    smtp_user VARCHAR(150) DEFAULT '',
+    smtp_pass VARCHAR(255) DEFAULT '',
+    smtp_from VARCHAR(150) DEFAULT 'hr.multiskill@ajinomoto.co.id',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Seed Konfigurasi Awal
+INSERT INTO public.system_config (id) VALUES ('global_config')
+ON CONFLICT (id) DO NOTHING;
+
+-- 4. TABEL LOG AUDIT AKTIVITAS & RIWAYAT EMAIL SISTEM
+CREATE TABLE IF NOT EXISTS public.activity_logs (
+    id BIGSERIAL PRIMARY KEY,
+    timestamp TIMESTAMPTZ DEFAULT NOW(),
+    username VARCHAR(100) NOT NULL,
+    action VARCHAR(100) NOT NULL,
+    details TEXT,
+    ip_address VARCHAR(50)
+);
+
+CREATE TABLE IF NOT EXISTS public.email_logs (
+    id BIGSERIAL PRIMARY KEY,
+    timestamp TIMESTAMPTZ DEFAULT NOW(),
+    sender VARCHAR(100) NOT NULL,
+    recipient TEXT NOT NULL,
+    subject VARCHAR(255) NOT NULL,
+    status VARCHAR(50) NOT NULL,
+    error_message TEXT
+);
+
+-- 5. PENGATURAN ROW LEVEL SECURITY (RLS) UNTUK INTEGRASI WEB & API
 ALTER TABLE public.${tableName} ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.users_accounts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.system_config ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.activity_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.email_logs ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Allow public read access" 
-ON public.${tableName} FOR SELECT USING (true);
+CREATE POLICY "Allow public all access on ${tableName}" ON public.${tableName} FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public all access on users_accounts" ON public.users_accounts FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public all access on system_config" ON public.system_config FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public all access on activity_logs" ON public.activity_logs FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public all access on email_logs" ON public.email_logs FOR ALL USING (true) WITH CHECK (true);
 
-CREATE POLICY "Allow public insert/update access" 
-ON public.${tableName} FOR ALL USING (true) WITH CHECK (true);
-
--- 4. View Rekapitulasi Otomatis (Opsional untuk Dashboard)
+-- 6. VIEW DASHBOARD SUMMARY
 CREATE OR REPLACE VIEW public.v_${tableName}_summary AS
 SELECT 
     tahun,
@@ -1364,6 +1459,148 @@ FROM public.${tableName}
 GROUP BY tahun, bulan, divisi, department;
 `;
 }
+
+// -------------------------------------------------------------
+// Google Apps Script (GAS) Generator for Google Sheets Synchronization
+// -------------------------------------------------------------
+export function generateGoogleAppsScriptForSheets(): string {
+  return `/**
+ * =========================================================================
+ * PT AJINOMOTO INDONESIA - MOJOKERTO FACTORY
+ * GOOGLE APPS SCRIPT: TWO-WAY SYNC MULTI-SKILL SYSTEM & GOOGLE SHEETS
+ * =========================================================================
+ * 
+ * CARA PEMASANGAN:
+ * 1. Buka Google Sheet Master Multi-Skill Anda.
+ * 2. Klik menu 'Extensions' (Ekstensi) -> 'Apps Script'.
+ * 3. Hapus kode bawaan dan tempel seluruh kode di bawah ini.
+ * 4. Simpan (Ctrl+S) lalu jalankan fungsi 'createMultiSkillSheetTemplate()' untuk membuat format kolom otomatis.
+ */
+
+// Konfigurasi Header Kolom Matriks Multi-Skill
+var SKILL_CODES = [
+  "FI-1 / H-1", "FI-1 / H-2", "FI-1 / H-4", "FI-1 / H-5,6", "FI-2 / Production", "FI-2 / Supporting",
+  "FP-1 / EMP", "FP-1 / Masako Bulk", "FP-1 / Liquid", "FP-2 / Packaging", "FP-2 / Warehouse",
+  "QC / Chemical Analysis", "QC / Microbiology", "QA / Food Safety", "Engineering / Mechanical",
+  "Engineering / Electrical", "Engineering / Automation & PLC", "Utility / Boiler & Steam",
+  "Utility / Water Treatment (WTP)", "Utility / Waste Water (WWTP)", "HSE / K3 & Environmental"
+];
+
+/**
+ * 1. Fungsi Membuat Sheet Baru dengan Format Standar Multi-Skill Ajinomoto
+ */
+function createMultiSkillSheetTemplate() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetName = "MULTI_SKILL_MASTER";
+  var sheet = ss.getSheetByName(sheetName);
+  
+  if (!sheet) {
+    sheet = ss.insertSheet(sheetName);
+  } else {
+    sheet.clear();
+  }
+  
+  var baseHeaders = [
+    "No", "Emp ID", "Emp Name", "Divisi", "Department", "Section", "Grade", "Job Grade",
+    "Jabatan", "Gender", "Tanggal Pensiun", "PIC", "Tahun", "Bulan", "Job Category",
+    "Total Score", "Standard", "Result", "Gap"
+  ];
+  
+  var fullHeaders = baseHeaders.concat(SKILL_CODES);
+  
+  // Tulis Header
+  sheet.getRange(1, 1, 1, fullHeaders.length).setValues([fullHeaders]);
+  
+  // Format Header
+  var headerRange = sheet.getRange(1, 1, 1, fullHeaders.length);
+  headerRange.setBackground("#B91C1C"); // Ajinomoto Red
+  headerRange.setFontColor("#FFFFFF");
+  headerRange.setFontWeight("bold");
+  headerRange.setHorizontalAlignment("center");
+  sheet.setFrozenRows(1);
+  sheet.setFrozenColumns(3);
+  
+  // Tulis Baris Contoh Karyawan
+  var sampleRow = [
+    1, "AJN-MJK-0101", "Ahmad Fadhil Kurniawan", "Produksi MSG & Seasoning", "Fermentation Department",
+    "Inoculum & Media Section", "M4", "JG-11", "Department Manager Fermentation", "L", "14 Nov 2038",
+    "Rudi Hartono", 2026, 8, "Dept. Manager up", 11, 4, "MS", 7
+  ];
+  
+  // Checklist skills sample
+  for (var i = 0; i < SKILL_CODES.length; i++) {
+    sampleRow.push(i < 11 ? 1 : 0);
+  }
+  
+  sheet.getRange(2, 1, 1, sampleRow.length).setValues([sampleRow]);
+  
+  SpreadsheetApp.getUi().alert("Template Multi-Skill Ajinomoto berhasil dibuat pada sheet: " + sheetName);
+}
+
+/**
+ * 2. Web App API Endpoint untuk integrasi realtime (GET)
+ */
+function doGet(e) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("MULTI_SKILL_MASTER") || ss.getActiveSheet();
+  var data = sheet.getDataRange().getValues();
+  
+  if (data.length < 2) {
+    return ContentService.createTextOutput(JSON.stringify({ success: true, count: 0, data: [] }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+  
+  var headers = data[0];
+  var rows = [];
+  
+  for (var r = 1; r < data.length; r++) {
+    var row = data[r];
+    var emp = {
+      rowIndex: r + 1,
+      no: row[0],
+      empId: String(row[1] || ''),
+      empName: String(row[2] || ''),
+      divisi: String(row[3] || ''),
+      department: String(row[4] || ''),
+      section: String(row[5] || ''),
+      grade: String(row[6] || ''),
+      jobGrade: String(row[7] || ''),
+      jabatan: String(row[8] || ''),
+      gender: String(row[9] || 'L'),
+      tanggalPensiun: String(row[10] || ''),
+      pic: String(row[11] || ''),
+      tahun: Number(row[12]) || 2026,
+      bulan: Number(row[13]) || 8,
+      jobCategory: String(row[14] || ''),
+      totalScore: Number(row[15]) || 0,
+      standard: Number(row[16]) || 0,
+      result: String(row[17] || 'US'),
+      gap: Number(row[18]) || 0,
+      skills: {}
+    };
+    
+    for (var c = 19; c < headers.length; c++) {
+      var skillCode = headers[c];
+      var val = row[c];
+      emp.skills[skillCode] = (val === 1 || val === "1" || val === true || String(val).toLowerCase() === "true" || String(val).toLowerCase() === "v");
+    }
+    
+    rows.push(emp);
+  }
+  
+  var response = {
+    success: true,
+    count: rows.length,
+    timestamp: new Date().toISOString(),
+    data: rows
+  };
+  
+  return ContentService.createTextOutput(JSON.stringify(response))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+`;
+}
+
 
 // -------------------------------------------------------------
 // Download Sample CSV Template

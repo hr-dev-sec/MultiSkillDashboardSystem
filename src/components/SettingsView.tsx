@@ -20,10 +20,18 @@ import {
   fetchUserDatabaseInfo,
   downloadUsersDatabaseBackup,
   downloadFullSystemBackup,
+  getUsersDatabaseBackupText,
+  getFullSystemBackupText,
+  triggerFileDownload,
   importUsersDatabase,
   resetUsersDatabase
 } from '../utils/systemDbService';
-import { DEFAULT_GOOGLE_SHEET_URL, getSavedGoogleSheetUrl } from '../utils/syncService';
+import {
+  DEFAULT_GOOGLE_SHEET_URL,
+  getSavedGoogleSheetUrl,
+  generateCompleteSupabaseSqlSchema,
+  generateGoogleAppsScriptForSheets
+} from '../utils/syncService';
 import { SmtpConfig, getSavedSmtpConfig, saveSmtpConfig, testSmtpConnection } from '../utils/emailReportService';
 import { ExportExcelConfirmModal } from './ExportExcelConfirmModal';
 import { ExportPdfModal } from './ExportPdfModal';
@@ -280,7 +288,25 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   // User Database Backup & Restore Handlers
   const [userDbActionAlert, setUserDbActionAlert] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [isExportingUserDb, setIsExportingUserDb] = useState(false);
+  const [isExportingFullDb, setIsExportingFullDb] = useState(false);
   const [isImportingUserDb, setIsImportingUserDb] = useState(false);
+
+  // Raw Backup Modal State
+  const [rawBackupModal, setRawBackupModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    content: string;
+    filename: string;
+  }>({
+    isOpen: false,
+    title: '',
+    content: '',
+    filename: ''
+  });
+
+  // Supabase & GAS Script Generator State
+  const [selectedScriptTab, setSelectedScriptTab] = useState<'supabase' | 'gas'>('supabase');
+  const [scriptCopyToast, setScriptCopyToast] = useState<string | null>(null);
 
   const handleBackupUserDb = async () => {
     setIsExportingUserDb(true);
@@ -294,13 +320,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         confetti({ particleCount: 40, spread: 60, origin: { y: 0.7 } });
       } catch (_) {}
     } else {
-      setUserDbActionAlert({ type: 'error', message: 'Gagal mengunduh file backup database pengguna.' });
+      setUserDbActionAlert({ type: 'error', message: 'Gagal mengunduh file backup database pengguna via browser.' });
     }
   };
 
-  const handleBackupFullSystemDb = () => {
+  const handleBackupFullSystemDb = async () => {
+    setIsExportingFullDb(true);
     setUserDbActionAlert(null);
-    const success = downloadFullSystemBackup(employees);
+    const success = await downloadFullSystemBackup(employees);
+    setIsExportingFullDb(false);
     if (success) {
       setUserDbActionAlert({
         type: 'success',
@@ -311,8 +339,56 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         confetti({ particleCount: 60, spread: 80, origin: { y: 0.6 } });
       } catch (_) {}
     } else {
-      setUserDbActionAlert({ type: 'error', message: 'Gagal membuat file cadangan sistem lengkap.' });
+      setUserDbActionAlert({ type: 'error', message: 'Gagal membuat file cadangan sistem lengkap via browser.' });
     }
+  };
+
+  const handleCopyUserDbJson = async () => {
+    try {
+      const text = await getUsersDatabaseBackupText();
+      await navigator.clipboard.writeText(text);
+      setUserDbActionAlert({ type: 'success', message: 'JSON Cadangan Database User berhasil disalin ke clipboard!' });
+      setTimeout(() => setUserDbActionAlert(null), 4000);
+      try {
+        confetti({ particleCount: 30, spread: 50, origin: { y: 0.7 } });
+      } catch (_) {}
+    } catch (err) {
+      setUserDbActionAlert({ type: 'error', message: 'Gagal menyalin JSON ke clipboard.' });
+    }
+  };
+
+  const handleCopyFullSystemDbJson = async () => {
+    try {
+      const text = await getFullSystemBackupText(employees);
+      await navigator.clipboard.writeText(text);
+      setUserDbActionAlert({ type: 'success', message: 'JSON Cadangan Sistem Lengkap berhasil disalin ke clipboard!' });
+      setTimeout(() => setUserDbActionAlert(null), 4000);
+      try {
+        confetti({ particleCount: 40, spread: 60, origin: { y: 0.7 } });
+      } catch (_) {}
+    } catch (err) {
+      setUserDbActionAlert({ type: 'error', message: 'Gagal menyalin JSON ke clipboard.' });
+    }
+  };
+
+  const handleViewUserDbJson = async () => {
+    const text = await getUsersDatabaseBackupText();
+    setRawBackupModal({
+      isOpen: true,
+      title: 'Pratinjau JSON: Database Pengguna (users_db.json)',
+      content: text,
+      filename: `ajinomoto_users_db_backup_${new Date().toISOString().slice(0, 10)}.json`
+    });
+  };
+
+  const handleViewFullSystemDbJson = async () => {
+    const text = await getFullSystemBackupText(employees);
+    setRawBackupModal({
+      isOpen: true,
+      title: 'Pratinjau JSON: Cadangan Sistem Lengkap Multi-Skill',
+      content: text,
+      filename: `ajinomoto_full_system_database_backup_${new Date().toISOString().slice(0, 10)}.json`
+    });
   };
 
   const handleImportUserDbFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1073,33 +1149,85 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </p>
           </div>
 
-          <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
+          <div className="flex items-center gap-2 shrink-0 flex-wrap">
             <div className="px-3 py-1.5 rounded-xl bg-emerald-100 dark:bg-emerald-950/80 border border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 text-xs font-bold flex items-center gap-2 shadow-xs">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-              <span>users_db.json Aktif</span>
+              <span>Server DB Aktif</span>
             </div>
-            <button
-              type="button"
-              onClick={handleBackupUserDb}
-              disabled={isExportingUserDb}
-              className="px-3 py-2 rounded-xl text-xs font-bold bg-white dark:bg-slate-800 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-950 flex items-center gap-1.5 shadow-xs cursor-pointer transition disabled:opacity-50"
-              title="Unduh cadangan khusus database pengguna (users_db.json)"
-            >
-              <i className={`fa-solid fa-user-shield text-indigo-500 ${isExportingUserDb ? 'animate-bounce' : ''}`}></i>
-              <span>Backup User DB</span>
-            </button>
-            <button
-              type="button"
-              onClick={handleBackupFullSystemDb}
-              className="px-3 py-2 rounded-xl text-xs font-bold bg-white dark:bg-slate-800 border border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950 flex items-center gap-1.5 shadow-xs cursor-pointer transition"
-              title="Unduh cadangan komprehensif seluruh sistem (Karyawan, 92 Skill, Akun Pengguna, Konfigurasi)"
-            >
-              <i className="fa-solid fa-box-archive text-amber-500"></i>
-              <span>Backup Full System DB</span>
-            </button>
+
+            {/* Menu Dropdown / Button Actions for User DB */}
+            <div className="flex items-center gap-1.5 p-1 rounded-xl bg-indigo-50/80 dark:bg-indigo-950/50 border border-indigo-200/80 dark:border-indigo-800/80">
+              <span className="text-[11px] font-bold text-indigo-900 dark:text-indigo-200 px-2 flex items-center gap-1">
+                <i className="fa-solid fa-user-shield text-indigo-500"></i> User DB:
+              </span>
+              <button
+                type="button"
+                onClick={handleBackupUserDb}
+                disabled={isExportingUserDb}
+                className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-white dark:bg-slate-800 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900 flex items-center gap-1 shadow-xs cursor-pointer transition disabled:opacity-50"
+                title="Unduh file users_db.json"
+              >
+                <i className={`fa-solid fa-download text-[10px] ${isExportingUserDb ? 'animate-bounce' : ''}`}></i>
+                <span>Unduh</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleCopyUserDbJson}
+                className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-white dark:bg-slate-800 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900 flex items-center gap-1 shadow-xs cursor-pointer transition"
+                title="Salin isi JSON User DB ke Clipboard"
+              >
+                <i className="fa-solid fa-copy text-[10px]"></i>
+                <span>Salin</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleViewUserDbJson}
+                className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-white dark:bg-slate-800 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900 flex items-center gap-1 shadow-xs cursor-pointer transition"
+                title="Lihat teks JSON User DB"
+              >
+                <i className="fa-solid fa-eye text-[10px]"></i>
+                <span>Lihat</span>
+              </button>
+            </div>
+
+            {/* Menu Dropdown / Button Actions for Full System DB */}
+            <div className="flex items-center gap-1.5 p-1 rounded-xl bg-amber-50/80 dark:bg-amber-950/50 border border-amber-200/80 dark:border-amber-800/80">
+              <span className="text-[11px] font-bold text-amber-900 dark:text-amber-200 px-2 flex items-center gap-1">
+                <i className="fa-solid fa-box-archive text-amber-500"></i> Full Sistem DB:
+              </span>
+              <button
+                type="button"
+                onClick={handleBackupFullSystemDb}
+                disabled={isExportingFullDb}
+                className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-white dark:bg-slate-800 text-amber-900 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900 flex items-center gap-1 shadow-xs cursor-pointer transition disabled:opacity-50"
+                title="Unduh file backup lengkap (Karyawan, Skill, Akun, Config)"
+              >
+                <i className={`fa-solid fa-download text-[10px] ${isExportingFullDb ? 'animate-bounce' : ''}`}></i>
+                <span>Unduh</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleCopyFullSystemDbJson}
+                className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-white dark:bg-slate-800 text-amber-900 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900 flex items-center gap-1 shadow-xs cursor-pointer transition"
+                title="Salin isi JSON Full Sistem DB ke Clipboard"
+              >
+                <i className="fa-solid fa-copy text-[10px]"></i>
+                <span>Salin</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleViewFullSystemDbJson}
+                className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-white dark:bg-slate-800 text-amber-900 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900 flex items-center gap-1 shadow-xs cursor-pointer transition"
+                title="Lihat teks JSON Full Sistem DB"
+              >
+                <i className="fa-solid fa-eye text-[10px]"></i>
+                <span>Lihat</span>
+              </button>
+            </div>
+
             <label className="px-3 py-2 rounded-xl text-xs font-bold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-750 flex items-center gap-1.5 shadow-xs cursor-pointer transition">
               <i className={`fa-solid fa-upload text-emerald-500 ${isImportingUserDb ? 'animate-spin' : ''}`}></i>
-              <span>{isImportingUserDb ? 'Memulihkan...' : 'Restore User DB'}</span>
+              <span>{isImportingUserDb ? 'Memulihkan...' : 'Restore DB'}</span>
               <input
                 type="file"
                 accept=".json"
@@ -1115,7 +1243,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               title="Reset database user ke setelan default"
             >
               <i className="fa-solid fa-rotate-left text-xs"></i>
-              <span>Reset Default</span>
+              <span>Reset</span>
             </button>
             <button
               type="button"
@@ -1329,6 +1457,136 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
           </div>
         )}
+      </div>
+
+      {/* ROW 1.8: SKRIP DATABASE (SUPABASE POSTGRESQL & GOOGLE APPS SCRIPT) */}
+      <div className="card-elegant p-6 border border-amber-500/30 bg-gradient-to-br from-white via-white to-amber-50/20 dark:from-slate-900 dark:via-slate-900 dark:to-amber-950/20 space-y-4">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div>
+            <p className="eyebrow !text-amber-600 dark:text-amber-400 text-[10px] uppercase font-bold tracking-wider mb-1 flex items-center gap-1.5">
+              <i className="fa-solid fa-code text-amber-600 dark:text-amber-400"></i> Database &amp; Cloud Script Generator
+            </p>
+            <h3 className="section-title text-base sm:text-lg mb-1 flex items-center gap-2 text-slate-900 dark:text-white">
+              Skrip Database Supabase (SQL) &amp; Google Apps Script (GAS)
+            </h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400 max-w-3xl leading-relaxed">
+              Gunakan skrip otomatis ini jika Anda ingin membuat database / tabel baru pada proyek Supabase PostgreSQL atau membuat sheet terformat dengan 92 kolom matriks skill di Google Sheets.
+            </p>
+          </div>
+
+          {/* Tab Selector */}
+          <div className="flex items-center gap-1 p-1 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shrink-0">
+            <button
+              type="button"
+              onClick={() => setSelectedScriptTab('supabase')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                selectedScriptTab === 'supabase'
+                  ? 'bg-amber-500 text-slate-950 shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <i className="fa-solid fa-database text-[11px]"></i>
+              <span>Supabase (PostgreSQL SQL)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedScriptTab('gas')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                selectedScriptTab === 'gas'
+                  ? 'bg-emerald-500 text-slate-950 shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <i className="fa-solid fa-file-excel text-[11px]"></i>
+              <span>Google Apps Script (.gs)</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Script Content Viewer & Actions */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="flex items-center gap-2 text-xs font-bold text-slate-700 dark:text-slate-300">
+              <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+              <span>
+                {selectedScriptTab === 'supabase'
+                  ? 'Schema SQL Lengkap (Tabel Karyawan + Matriks 92 Skill, Akun Pengguna, Konfigurasi, Index & RLS)'
+                  : 'Google Apps Script Code.gs (Pembuat Sheet Otomatis + Webhook API GET)'}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={async () => {
+                  const content = selectedScriptTab === 'supabase' ? generateCompleteSupabaseSqlSchema() : generateGoogleAppsScriptForSheets();
+                  await navigator.clipboard.writeText(content);
+                  setScriptCopyToast(selectedScriptTab === 'supabase' ? 'Skrip SQL Supabase berhasil disalin ke clipboard!' : 'Google Apps Script berhasil disalin ke clipboard!');
+                  setTimeout(() => setScriptCopyToast(null), 3500);
+                  try {
+                    confetti({ particleCount: 35, spread: 60, origin: { y: 0.8 } });
+                  } catch (_) {}
+                }}
+                className="px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 flex items-center gap-1.5 shadow-xs cursor-pointer transition"
+              >
+                <i className="fa-solid fa-copy"></i>
+                <span>Salin Skrip</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const content = selectedScriptTab === 'supabase' ? generateCompleteSupabaseSqlSchema() : generateGoogleAppsScriptForSheets();
+                  const filename = selectedScriptTab === 'supabase' ? 'supabase_ajinomoto_schema.sql' : 'ajinomoto_multi_skill_sheets_sync.gs';
+                  const mime = selectedScriptTab === 'supabase' ? 'application/sql' : 'text/javascript';
+                  triggerFileDownload(content, filename, mime);
+                  try {
+                    confetti({ particleCount: 40, spread: 70, origin: { y: 0.8 } });
+                  } catch (_) {}
+                }}
+                className="px-3 py-1.5 rounded-xl text-xs font-bold bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-750 flex items-center gap-1.5 shadow-xs cursor-pointer transition"
+              >
+                <i className="fa-solid fa-download"></i>
+                <span>Unduh File</span>
+              </button>
+            </div>
+          </div>
+
+          {scriptCopyToast && (
+            <div className="p-2.5 rounded-xl text-xs font-bold bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-300 flex items-center gap-2">
+              <i className="fa-solid fa-check"></i>
+              <span>{scriptCopyToast}</span>
+            </div>
+          )}
+
+          {/* Syntax Box */}
+          <div className="relative rounded-2xl border border-slate-800 bg-slate-950 text-slate-200 font-mono text-[11px] p-4 max-h-64 overflow-y-auto leading-relaxed shadow-inner">
+            <pre className="whitespace-pre-wrap select-all">
+              {selectedScriptTab === 'supabase' ? generateCompleteSupabaseSqlSchema() : generateGoogleAppsScriptForSheets()}
+            </pre>
+          </div>
+
+          <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-[11.5px] text-slate-600 dark:text-slate-400 space-y-1">
+            <p className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+              <i className="fa-solid fa-circle-info text-amber-500"></i>
+              {selectedScriptTab === 'supabase' ? 'Petunjuk Pemasangan di Supabase:' : 'Petunjuk Pemasangan di Google Sheets:'}
+            </p>
+            {selectedScriptTab === 'supabase' ? (
+              <ol className="list-decimal list-inside space-y-0.5 pl-1">
+                <li>Buka dashboard Supabase project Anda (<a href="https://supabase.com/dashboard" target="_blank" rel="noreferrer" className="text-indigo-600 dark:text-cyan-400 underline font-semibold">supabase.com/dashboard</a>).</li>
+                <li>Pilih menu <b>SQL Editor</b> di bilah sisi kiri &rarr; klik <b>+ New Query</b>.</li>
+                <li>Klik tombol <b>"Salin Skrip"</b> di atas, tempel (Paste) ke SQL Editor, lalu klik <b>Run</b>.</li>
+                <li>Tabel karyawan multi-skill, akun pengguna, konfigurasi, dan view rekapitulasi akan langsung terbuat secara otomatis!</li>
+              </ol>
+            ) : (
+              <ol className="list-decimal list-inside space-y-0.5 pl-1">
+                <li>Buka Google Sheet master Anda &rarr; klik menu <b>Extensions</b> &rarr; <b>Apps Script</b>.</li>
+                <li>Hapus kode bawaan dan tempel (Paste) skrip di atas ke editor Apps Script.</li>
+                <li>Simpan (Ctrl+S), lalu pilih fungsi <b>createMultiSkillSheetTemplate</b> dan klik <b>Run</b> untuk membuat template otomatis.</li>
+              </ol>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* ROW 2: DUPLIKASI DATA & DOWNLOAD DATA */}
@@ -1997,6 +2255,68 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </div>
       )}
+      {/* Modal Pratinjau & Salin Raw JSON Backup */}
+      {rawBackupModal.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-fadeIn">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl overflow-hidden animate-scaleUp">
+            <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/50 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <span className="w-8 h-8 rounded-xl bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 flex items-center justify-center text-sm font-bold shadow-xs">
+                  <i className="fa-solid fa-code"></i>
+                </span>
+                <div>
+                  <h3 className="font-bold text-sm text-slate-900 dark:text-white">{rawBackupModal.title}</h3>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">{rawBackupModal.filename}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRawBackupModal({ isOpen: false, title: '', content: '', filename: '' })}
+                className="w-7 h-7 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center transition cursor-pointer"
+              >
+                <i className="fa-solid fa-xmark"></i>
+              </button>
+            </div>
+
+            <div className="p-4 flex-1 overflow-y-auto bg-slate-950 text-slate-200 font-mono text-[11px] leading-relaxed">
+              <pre className="whitespace-pre-wrap select-all">{rawBackupModal.content}</pre>
+            </div>
+
+            <div className="p-4 bg-slate-50 dark:bg-slate-850 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3">
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Data JSON dapat langsung disalin atau diunduh ke komputer Anda.
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await navigator.clipboard.writeText(rawBackupModal.content);
+                    try {
+                      confetti({ particleCount: 30, spread: 50, origin: { y: 0.8 } });
+                    } catch (_) {}
+                    alert('Isi JSON berhasil disalin ke Clipboard!');
+                  }}
+                  className="px-3.5 py-2 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 flex items-center gap-1.5 shadow-xs cursor-pointer transition"
+                >
+                  <i className="fa-solid fa-copy"></i>
+                  <span>Salin JSON</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    triggerFileDownload(rawBackupModal.content, rawBackupModal.filename, 'application/json');
+                  }}
+                  className="btn-navy px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer"
+                >
+                  <i className="fa-solid fa-download"></i>
+                  <span>Unduh JSON</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Modal HD Photo Viewer */}
       <HdPhotoModal
         isOpen={isHdPreviewOpen}
