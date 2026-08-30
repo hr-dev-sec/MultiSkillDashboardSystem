@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { motion } from 'motion/react';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -865,7 +866,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   return (
     <div className="space-y-6">
       {/* EXECUTIVE HIGHLIGHT BANNER */}
-      <div
+      <motion.div
+        initial={{ opacity: 0, y: -16, scale: 0.985 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }}
+        whileHover={{ y: -2, transition: { duration: 0.2 } }}
         className={`relative overflow-hidden rounded-3xl p-5 sm:p-6 transition-all duration-300 ${
           isDarkMode
             ? 'bg-gradient-to-r from-[#0A192F] via-[#0E2340] to-[#122A4E] text-white shadow-2xl border border-cyan-500/25 shadow-[0_0_35px_rgba(34,211,238,0.1)]'
@@ -944,25 +949,33 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
 
             {onOpenPdfModal && (
-              <button
+              <motion.button
                 type="button"
+                whileHover={{ scale: 1.04 }}
+                whileTap={{ scale: 0.95 }}
                 onClick={onOpenPdfModal}
-                className="px-4 py-2.5 rounded-2xl font-bold text-xs flex items-center gap-2 shadow-sm transition-all duration-200 cursor-pointer bg-red-600 hover:bg-red-700 text-white active:scale-95"
+                className="px-4 py-2.5 rounded-2xl font-bold text-xs flex items-center gap-2 shadow-sm transition-colors cursor-pointer bg-red-600 hover:bg-red-700 text-white"
                 title="Cetak & Unduh Laporan PDF Resmi Standar PT Ajinomoto Indonesia"
               >
                 <i className="fa-solid fa-file-pdf text-sm"></i>
                 <span className="hidden sm:inline">Cetak Laporan PDF</span>
                 <span className="sm:hidden">PDF</span>
-              </button>
+              </motion.button>
             )}
           </div>
         </div>
-      </div>
+      </motion.div>
 
       {/* 4 STAT CARDS */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 sm:gap-5">
         {/* Card 1: Total Manpower */}
-        <div className="relative overflow-hidden rounded-3xl p-5 bg-white dark:bg-[#0A192F] border border-slate-200/90 dark:border-white/10 shadow-xs dark:shadow-xl hover:shadow-md transition-all group">
+        <motion.div
+          initial={{ opacity: 0, y: 20, scale: 0.94 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ duration: 0.3, delay: 0.05, ease: [0.16, 1, 0.3, 1] }}
+          whileHover={{ y: -5, scale: 1.018, transition: { duration: 0.2 } }}
+          className="relative overflow-hidden rounded-3xl p-5 bg-white dark:bg-[#0A192F] border border-slate-200/90 dark:border-white/10 shadow-xs dark:shadow-xl hover:shadow-md transition-shadow group"
+        >
           <div className="flex items-start justify-between">
             <div>
               <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
@@ -975,7 +988,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <span className="font-semibold text-slate-700 dark:text-slate-300">Terdaftar</span> dalam periode aktif
               </p>
             </div>
-            <div className={`h-12 w-12 rounded-2xl flex items-center justify-center shadow-xs group-hover:scale-105 transition-transform shrink-0 ${
+            <div className={`h-12 w-12 rounded-2xl flex items-center justify-center shadow-xs group-hover:scale-110 transition-transform shrink-0 ${
               isDarkMode
                 ? 'text-white bg-gradient-to-br from-[#0E2340] to-[#1E3A8A] border border-cyan-500/20'
                 : 'text-blue-700 bg-blue-50 border border-blue-200/80'
@@ -987,10 +1000,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <span>Cakupan Pemantauan</span>
             <span className="font-bold text-slate-700 dark:text-slate-300">{byDivisi.length} Divisi &bull; {byDepartment.length} Dept</span>
           </div>
-        </div>
+        </motion.div>
 
         {/* Card 2: Standar MS/OK */}
-        <div className="relative overflow-hidden rounded-3xl p-5 bg-white dark:bg-[#0A192F] border border-slate-200/90 dark:border-white/10 shadow-xs dark:shadow-xl hover:shadow-md transition-all group">
+        <motion.div
+          initial={{ opacity: 0, y: 20, scale: 0.94 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ duration: 0.3, delay: 0.1, ease: [0.16, 1, 0.3, 1] }}
+          whileHover={{ y: -5, scale: 1.018, transition: { duration: 0.2 } }}
+          className="relative overflow-hidden rounded-3xl p-5 bg-white dark:bg-[#0A192F] border border-slate-200/90 dark:border-white/10 shadow-xs dark:shadow-xl hover:shadow-md transition-shadow group"
+        >
           <div className="flex items-start justify-between">
             <div>
               <p className="text-xs font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
@@ -1003,7 +1022,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <span className="font-bold text-emerald-600 dark:text-emerald-400">{pctFormatted}</span> dari total karyawan
               </p>
             </div>
-            <div className={`h-12 w-12 rounded-2xl flex items-center justify-center shadow-xs group-hover:scale-105 transition-transform shrink-0 ${
+            <div className={`h-12 w-12 rounded-2xl flex items-center justify-center shadow-xs group-hover:scale-110 transition-transform shrink-0 ${
               isDarkMode
                 ? 'text-white bg-gradient-to-br from-emerald-500 to-teal-700 border border-emerald-500/30'
                 : 'text-emerald-700 bg-emerald-50 border border-emerald-200/80'
@@ -1020,10 +1039,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               />
             </div>
           </div>
-        </div>
+        </motion.div>
 
         {/* Card 3: Belum Standar US/Not OK */}
-        <div className="relative overflow-hidden rounded-3xl p-5 bg-white dark:bg-[#0A192F] border border-slate-200/90 dark:border-white/10 shadow-xs dark:shadow-xl hover:shadow-md transition-all group">
+        <motion.div
+          initial={{ opacity: 0, y: 20, scale: 0.94 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ duration: 0.3, delay: 0.15, ease: [0.16, 1, 0.3, 1] }}
+          whileHover={{ y: -5, scale: 1.018, transition: { duration: 0.2 } }}
+          className="relative overflow-hidden rounded-3xl p-5 bg-white dark:bg-[#0A192F] border border-slate-200/90 dark:border-white/10 shadow-xs dark:shadow-xl hover:shadow-md transition-shadow group"
+        >
           <div className="flex items-start justify-between">
             <div>
               <p className="text-xs font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400">
@@ -1039,7 +1064,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 dalam rencana pembinaan
               </p>
             </div>
-            <div className={`h-12 w-12 rounded-2xl flex items-center justify-center shadow-xs group-hover:scale-105 transition-transform shrink-0 ${
+            <div className={`h-12 w-12 rounded-2xl flex items-center justify-center shadow-xs group-hover:scale-110 transition-transform shrink-0 ${
               isDarkMode
                 ? 'text-white bg-gradient-to-br from-rose-500 to-red-700 border border-rose-500/30'
                 : 'text-rose-700 bg-rose-50 border border-rose-200/80'
@@ -1051,10 +1076,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <span className="text-slate-500">Target Pengembangan</span>
             <span className="font-bold text-rose-600 dark:text-rose-400">Gap: {totalUS} Orang</span>
           </div>
-        </div>
+        </motion.div>
 
         {/* Card 4: % Pencapaian Multi-Skill */}
-        <div className="relative overflow-hidden rounded-3xl p-5 bg-white dark:bg-[#0A192F] border border-slate-200/90 dark:border-white/10 shadow-xs dark:shadow-xl hover:shadow-md transition-all group">
+        <motion.div
+          initial={{ opacity: 0, y: 20, scale: 0.94 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ duration: 0.3, delay: 0.2, ease: [0.16, 1, 0.3, 1] }}
+          whileHover={{ y: -5, scale: 1.018, transition: { duration: 0.2 } }}
+          className="relative overflow-hidden rounded-3xl p-5 bg-white dark:bg-[#0A192F] border border-slate-200/90 dark:border-white/10 shadow-xs dark:shadow-xl hover:shadow-md transition-shadow group"
+        >
           <div className="flex items-start justify-between">
             <div>
               <p className="text-xs font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400">
@@ -1075,7 +1106,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 )}
               </p>
             </div>
-            <div className={`h-12 w-12 rounded-2xl flex items-center justify-center shadow-xs group-hover:scale-105 transition-transform shrink-0 ${
+            <div className={`h-12 w-12 rounded-2xl flex items-center justify-center shadow-xs group-hover:scale-110 transition-transform shrink-0 ${
               isDarkMode
                 ? 'text-slate-950 font-black bg-gradient-to-br from-amber-300 via-amber-400 to-amber-600 border border-amber-400/40'
                 : 'text-amber-800 bg-amber-50 border border-amber-200/80 font-black'
@@ -1092,13 +1123,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               />
             </div>
           </div>
-        </div>
+        </motion.div>
       </div>
 
       {/* ROW 1: Target vs Result & MS/US per Divisi */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         {/* Chart 1: Target vs Result per Position */}
-        <div className="rounded-3xl p-5 sm:p-6 bg-white dark:bg-[#0A192F] border border-slate-200/90 dark:border-white/10 shadow-xs dark:shadow-xl hover:shadow-md transition-shadow">
+        <motion.div
+          initial={{ opacity: 0, y: 22, scale: 0.985 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ duration: 0.35, delay: 0.15, ease: [0.16, 1, 0.3, 1] }}
+          whileHover={{ y: -3, transition: { duration: 0.2 } }}
+          className="rounded-3xl p-5 sm:p-6 bg-white dark:bg-[#0A192F] border border-slate-200/90 dark:border-white/10 shadow-xs dark:shadow-xl hover:shadow-md transition-shadow"
+        >
           <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 mb-4 border-b border-dashed border-slate-200 dark:border-white/10 gap-3">
             <div className="flex items-start gap-3">
               <div className={`h-10 w-10 rounded-2xl flex items-center justify-center shrink-0 shadow-xs ${
@@ -1148,10 +1185,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="h-72">
             <Bar data={positionChartData} options={positionChartOptions} />
           </div>
-        </div>
+        </motion.div>
 
         {/* Chart 2: Sebaran MS vs US per Divisi */}
-        <div className="rounded-3xl p-5 sm:p-6 bg-white dark:bg-[#0A192F] border border-slate-200/90 dark:border-white/10 shadow-xs dark:shadow-xl hover:shadow-md transition-shadow">
+        <motion.div
+          initial={{ opacity: 0, y: 22, scale: 0.985 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ duration: 0.35, delay: 0.2, ease: [0.16, 1, 0.3, 1] }}
+          whileHover={{ y: -3, transition: { duration: 0.2 } }}
+          className="rounded-3xl p-5 sm:p-6 bg-white dark:bg-[#0A192F] border border-slate-200/90 dark:border-white/10 shadow-xs dark:shadow-xl hover:shadow-md transition-shadow"
+        >
           <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 mb-4 border-b border-dashed border-slate-200 dark:border-white/10 gap-3">
             <div className="flex items-start gap-3">
               <div className={`h-10 w-10 rounded-2xl flex items-center justify-center shrink-0 shadow-xs ${
@@ -1201,13 +1244,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="h-72">
             <Bar data={divisiChartData} options={horizontalStackedOptions} />
           </div>
-        </div>
+        </motion.div>
       </div>
 
       {/* ROW 2: per Department & per Grade */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         {/* Chart 3: per Department */}
-        <div className="rounded-3xl p-5 sm:p-6 bg-white dark:bg-[#0A192F] border border-slate-200/90 dark:border-white/10 shadow-xs dark:shadow-xl hover:shadow-md transition-shadow">
+        <motion.div
+          initial={{ opacity: 0, y: 22, scale: 0.985 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ duration: 0.35, delay: 0.25, ease: [0.16, 1, 0.3, 1] }}
+          whileHover={{ y: -3, transition: { duration: 0.2 } }}
+          className="rounded-3xl p-5 sm:p-6 bg-white dark:bg-[#0A192F] border border-slate-200/90 dark:border-white/10 shadow-xs dark:shadow-xl hover:shadow-md transition-shadow"
+        >
           <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 mb-4 border-b border-dashed border-slate-200 dark:border-white/10 gap-3">
             <div className="flex items-start gap-3">
               <div className={`h-10 w-10 rounded-2xl flex items-center justify-center shrink-0 shadow-xs ${
@@ -1272,10 +1321,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="h-80">
             <Bar data={deptChartData} options={deptChartOptions} />
           </div>
-        </div>
+        </motion.div>
 
         {/* Chart 4: per Grade */}
-        <div className="rounded-3xl p-5 sm:p-6 bg-white dark:bg-[#0A192F] border border-slate-200/90 dark:border-white/10 shadow-xs dark:shadow-xl hover:shadow-md transition-shadow">
+        <motion.div
+          initial={{ opacity: 0, y: 22, scale: 0.985 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ duration: 0.35, delay: 0.3, ease: [0.16, 1, 0.3, 1] }}
+          whileHover={{ y: -3, transition: { duration: 0.2 } }}
+          className="rounded-3xl p-5 sm:p-6 bg-white dark:bg-[#0A192F] border border-slate-200/90 dark:border-white/10 shadow-xs dark:shadow-xl hover:shadow-md transition-shadow"
+        >
           <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 mb-4 border-b border-dashed border-slate-200 dark:border-white/10 gap-3">
             <div className="flex items-start gap-3">
               <div className={`h-10 w-10 rounded-2xl flex items-center justify-center shrink-0 shadow-xs ${
@@ -1303,13 +1358,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="h-80">
             <Bar data={gradeChartData} options={verticalStackedOptions} />
           </div>
-        </div>
+        </motion.div>
       </div>
 
       {/* ROW 3: Gender distribution & Job Category headcount */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         {/* Chart 5: Gender Donut */}
-        <div className="rounded-3xl p-5 sm:p-6 bg-white dark:bg-[#0A192F] border border-slate-200/90 dark:border-white/10 shadow-xs dark:shadow-xl hover:shadow-md transition-shadow xl:col-span-1">
+        <motion.div
+          initial={{ opacity: 0, y: 22, scale: 0.985 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ duration: 0.35, delay: 0.35, ease: [0.16, 1, 0.3, 1] }}
+          whileHover={{ y: -3, transition: { duration: 0.2 } }}
+          className="rounded-3xl p-5 sm:p-6 bg-white dark:bg-[#0A192F] border border-slate-200/90 dark:border-white/10 shadow-xs dark:shadow-xl hover:shadow-md transition-shadow xl:col-span-1"
+        >
           <div className="flex items-start gap-3 pb-4 mb-4 border-b border-dashed border-slate-200 dark:border-white/10">
             <div className={`h-10 w-10 rounded-2xl flex items-center justify-center shrink-0 shadow-xs ${
               isDarkMode
@@ -1346,10 +1407,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <p className="text-xs text-slate-400">Tidak ada data</p>
             )}
           </div>
-        </div>
+        </motion.div>
 
         {/* Chart 6: Manpower per Job Position */}
-        <div className="rounded-3xl p-5 sm:p-6 bg-white dark:bg-[#0A192F] border border-slate-200/90 dark:border-white/10 shadow-xs dark:shadow-xl hover:shadow-md transition-shadow xl:col-span-2">
+        <motion.div
+          initial={{ opacity: 0, y: 22, scale: 0.985 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ duration: 0.35, delay: 0.4, ease: [0.16, 1, 0.3, 1] }}
+          whileHover={{ y: -3, transition: { duration: 0.2 } }}
+          className="rounded-3xl p-5 sm:p-6 bg-white dark:bg-[#0A192F] border border-slate-200/90 dark:border-white/10 shadow-xs dark:shadow-xl hover:shadow-md transition-shadow xl:col-span-2"
+        >
           <div className="flex items-start gap-3 pb-4 mb-4 border-b border-dashed border-slate-200 dark:border-white/10">
             <div className={`h-10 w-10 rounded-2xl flex items-center justify-center shrink-0 shadow-xs ${
               isDarkMode
@@ -1371,11 +1438,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="h-64">
             <Bar data={manpowerPositionData} options={manpowerPositionOptions} />
           </div>
-        </div>
+        </motion.div>
       </div>
 
       {/* LOG NOTES & OPERATIONAL STANDARDS */}
-      <div className="rounded-3xl p-5 sm:p-6 bg-white dark:bg-[#0A192F] border border-slate-200/90 dark:border-white/10 shadow-xs dark:shadow-xl">
+      <motion.div
+        initial={{ opacity: 0, y: 18 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.35, delay: 0.45, ease: [0.16, 1, 0.3, 1] }}
+        className="rounded-3xl p-5 sm:p-6 bg-white dark:bg-[#0A192F] border border-slate-200/90 dark:border-white/10 shadow-xs dark:shadow-xl"
+      >
         <div className="flex items-center gap-2.5 pb-3 mb-3 border-b border-dashed border-slate-200 dark:border-white/10">
           <div className="h-8 w-8 rounded-xl flex items-center justify-center text-amber-900 dark:text-amber-300 bg-amber-400/20 border border-amber-400/30 shrink-0">
             <i className="fa-regular fa-note-sticky text-xs"></i>
@@ -1404,7 +1476,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             HRD &amp; Continuous Improvement Department &bull; Mojokerto Plant
           </span>
         </div>
-      </div>
+      </motion.div>
     </div>
   );
 };

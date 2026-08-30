@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import {
   getStoredEmployees,
   saveStoredEmployees,
@@ -450,181 +451,240 @@ export default function App() {
     }, 6000);
   }, []);
 
-  // Screen Routing
-  if (currentScreen === 'landing') {
-    return (
-      <LandingPage
-        employees={employees}
-        onEnterLogin={() => setCurrentScreen('login')}
-        isDarkMode={isDarkMode}
-        onToggleDarkMode={handleToggleDarkMode}
-      />
-    );
-  }
-
-  if (currentScreen === 'login') {
-    return (
-      <LoginPage
-        onLoginSuccess={handleLoginSuccess}
-        onBackToLanding={() => setCurrentScreen('landing')}
-        isDarkMode={isDarkMode}
-        onToggleDarkMode={handleToggleDarkMode}
-      />
-    );
-  }
-
+  // Screen Routing with Animated Transitions
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-[#F8FAFC] dark:bg-[#070D19] font-sans text-slate-900 dark:text-slate-100 transition-colors">
-      {/* GLOBAL TOAST NOTIFICATION */}
-      {toastNotification && (
-        <div className="fixed top-5 right-5 z-50 max-w-md bg-emerald-900/95 text-white px-4 py-3 rounded-2xl shadow-2xl border border-emerald-500/40 flex items-start gap-3 animate-fadeIn backdrop-blur-md">
-          <i className="fa-solid fa-circle-check text-emerald-400 mt-0.5 text-base shrink-0"></i>
-          <div className="text-xs leading-relaxed font-semibold flex-1">
-            {toastNotification}
-          </div>
-          <button
-            onClick={() => setToastNotification(null)}
-            className="text-white/60 hover:text-white shrink-0 ml-1 text-sm cursor-pointer"
-          >
-            <i className="fa-solid fa-xmark"></i>
-          </button>
-        </div>
+    <AnimatePresence mode="wait">
+      {currentScreen === 'landing' && (
+        <motion.div
+          key="screen-landing"
+          initial={{ opacity: 0, scale: 0.985 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.985 }}
+          transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
+          className="w-full h-full"
+        >
+          <LandingPage
+            employees={employees}
+            onEnterLogin={() => setCurrentScreen('login')}
+            isDarkMode={isDarkMode}
+            onToggleDarkMode={handleToggleDarkMode}
+          />
+        </motion.div>
       )}
 
-      {/* SIDEBAR */}
-      <Sidebar
-        activeTab={activeTab}
-        onSelectTab={setActiveTab}
-        onLogout={handleRequestLogout}
-        currentUser={currentUser}
-        isMobileOpen={isMobileSidebarOpen}
-        onCloseMobile={() => setIsMobileSidebarOpen(false)}
-        isCollapsed={isSidebarCollapsed}
-        onToggleCollapse={handleToggleSidebarCollapse}
-        isDarkMode={isDarkMode}
-      />
+      {currentScreen === 'login' && (
+        <motion.div
+          key="screen-login"
+          initial={{ opacity: 0, scale: 0.97, y: 10 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={{ opacity: 0, scale: 0.97, y: -10 }}
+          transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
+          className="w-full h-full"
+        >
+          <LoginPage
+            onLoginSuccess={handleLoginSuccess}
+            onBackToLanding={() => setCurrentScreen('landing')}
+            isDarkMode={isDarkMode}
+            onToggleDarkMode={handleToggleDarkMode}
+          />
+        </motion.div>
+      )}
 
-      {/* MAIN CONTENT WRAPPER */}
-      <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-[#F8FAFC] dark:bg-[#070D19] transition-colors">
-        {/* HEADER */}
-        <Header
-          activeTab={activeTab}
-          currentUser={currentUser}
-          onOpenMobileMenu={() => setIsMobileSidebarOpen(true)}
-          isDarkMode={isDarkMode}
-          onToggleDarkMode={handleToggleDarkMode}
-          isSidebarCollapsed={isSidebarCollapsed}
-          onToggleSidebarCollapse={handleToggleSidebarCollapse}
-          onOpenPdfModal={() => setIsGlobalPdfModalOpen(true)}
-        />
-
-        {/* SHARED FILTER BAR */}
-        <SharedFilterBar
-          filters={filters}
-          onFilterChange={setFilters}
-          onResetFilters={handleResetFilters}
-          periods={periods}
-          employees={employees}
-        />
-
-        {/* SCROLLABLE MAIN VIEW */}
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-7 relative bg-[#F8FAFC] dark:bg-[#070D19] transition-colors">
-          <div className="max-w-7xl mx-auto">
-            {activeTab === 'dashboard' && (
-              <DashboardView
-                stats={dashboardStats}
-                isDarkMode={isDarkMode}
-                onOpenPdfModal={() => setIsGlobalPdfModalOpen(true)}
-                onOpenExcelModal={() => setIsGlobalExcelModalOpen(true)}
-              />
+      {currentScreen === 'app' && (
+        <motion.div
+          key="screen-app"
+          initial={{ opacity: 0, scale: 0.99 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.99 }}
+          transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+          className="flex h-screen w-screen overflow-hidden bg-[#F8FAFC] dark:bg-[#070D19] font-sans text-slate-900 dark:text-slate-100 transition-colors"
+        >
+          {/* GLOBAL TOAST NOTIFICATION */}
+          <AnimatePresence>
+            {toastNotification && (
+              <motion.div
+                initial={{ opacity: 0, y: -30, scale: 0.92, x: 20 }}
+                animate={{ opacity: 1, y: 0, scale: 1, x: 0 }}
+                exit={{ opacity: 0, y: -20, scale: 0.92, x: 20 }}
+                transition={{ type: 'spring', stiffness: 450, damping: 28 }}
+                className="fixed top-5 right-5 z-50 max-w-md bg-emerald-900/95 text-white px-4 py-3 rounded-2xl shadow-2xl border border-emerald-500/40 flex items-start gap-3 backdrop-blur-md"
+              >
+                <i className="fa-solid fa-circle-check text-emerald-400 mt-0.5 text-base shrink-0"></i>
+                <div className="text-xs leading-relaxed font-semibold flex-1">
+                  {toastNotification}
+                </div>
+                <button
+                  onClick={() => setToastNotification(null)}
+                  className="text-white/60 hover:text-white shrink-0 ml-1 text-sm cursor-pointer"
+                >
+                  <i className="fa-solid fa-xmark"></i>
+                </button>
+              </motion.div>
             )}
+          </AnimatePresence>
 
-            {activeTab === 'employee' && (
-              <EmployeeDataView
-                employees={employees}
-                filteredEmployees={filteredEmployees}
-                skillMeta={INITIAL_SKILL_META}
-                periods={periods}
-                onUpdateSkill={handleUpdateSkill}
-                onAddEmployee={handleAddEmployee}
-                onDeleteEmployee={handleDeleteEmployee}
-                onOpenImportModal={() => setIsImportModalOpen(true)}
-                onOpenExcelModal={() => setIsGlobalExcelModalOpen(true)}
-                onOpenPdfModal={() => setIsGlobalPdfModalOpen(true)}
-              />
-            )}
+          {/* SIDEBAR */}
+          <Sidebar
+            activeTab={activeTab}
+            onSelectTab={setActiveTab}
+            onLogout={handleRequestLogout}
+            currentUser={currentUser}
+            isMobileOpen={isMobileSidebarOpen}
+            onCloseMobile={() => setIsMobileSidebarOpen(false)}
+            isCollapsed={isSidebarCollapsed}
+            onToggleCollapse={handleToggleSidebarCollapse}
+            isDarkMode={isDarkMode}
+          />
 
-            {activeTab === 'settings' && (
-              <SettingsView
-                currentUser={currentUser}
-                employees={employees}
-                filteredEmployees={filteredEmployees}
-                filters={filters}
-                periods={periods}
-                isDarkMode={isDarkMode}
-                onToggleDarkMode={handleToggleDarkMode}
-                onRefreshData={(newEmployees) => setEmployees(newEmployees)}
-                onOpenImportModal={() => setIsImportModalOpen(true)}
-                onUpdateCurrentUser={(updatedUser) => {
-                  saveSession(updatedUser);
-                  setCurrentUser(updatedUser);
-                }}
-              />
-            )}
+          {/* MAIN CONTENT WRAPPER */}
+          <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-[#F8FAFC] dark:bg-[#070D19] transition-colors">
+            {/* HEADER */}
+            <Header
+              activeTab={activeTab}
+              currentUser={currentUser}
+              onOpenMobileMenu={() => setIsMobileSidebarOpen(true)}
+              isDarkMode={isDarkMode}
+              onToggleDarkMode={handleToggleDarkMode}
+              isSidebarCollapsed={isSidebarCollapsed}
+              onToggleSidebarCollapse={handleToggleSidebarCollapse}
+              onOpenPdfModal={() => setIsGlobalPdfModalOpen(true)}
+            />
+
+            {/* SHARED FILTER BAR */}
+            <SharedFilterBar
+              filters={filters}
+              onFilterChange={setFilters}
+              onResetFilters={handleResetFilters}
+              periods={periods}
+              employees={employees}
+            />
+
+            {/* SCROLLABLE MAIN VIEW */}
+            <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-7 relative bg-[#F8FAFC] dark:bg-[#070D19] transition-colors">
+              <div className="max-w-7xl mx-auto">
+                <AnimatePresence mode="wait">
+                  {activeTab === 'dashboard' && (
+                    <motion.div
+                      key="tab-dashboard"
+                      initial={{ opacity: 0, y: 16, scale: 0.985 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: -12, scale: 0.99 }}
+                      transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
+                    >
+                      <DashboardView
+                        stats={dashboardStats}
+                        isDarkMode={isDarkMode}
+                        onOpenPdfModal={() => setIsGlobalPdfModalOpen(true)}
+                        onOpenExcelModal={() => setIsGlobalExcelModalOpen(true)}
+                      />
+                    </motion.div>
+                  )}
+
+                  {activeTab === 'employee' && (
+                    <motion.div
+                      key="tab-employee"
+                      initial={{ opacity: 0, y: 16, scale: 0.985 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: -12, scale: 0.99 }}
+                      transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
+                    >
+                      <EmployeeDataView
+                        employees={employees}
+                        filteredEmployees={filteredEmployees}
+                        skillMeta={INITIAL_SKILL_META}
+                        periods={periods}
+                        onUpdateSkill={handleUpdateSkill}
+                        onAddEmployee={handleAddEmployee}
+                        onDeleteEmployee={handleDeleteEmployee}
+                        onOpenImportModal={() => setIsImportModalOpen(true)}
+                        onOpenExcelModal={() => setIsGlobalExcelModalOpen(true)}
+                        onOpenPdfModal={() => setIsGlobalPdfModalOpen(true)}
+                      />
+                    </motion.div>
+                  )}
+
+                  {activeTab === 'settings' && (
+                    <motion.div
+                      key="tab-settings"
+                      initial={{ opacity: 0, y: 16, scale: 0.985 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: -12, scale: 0.99 }}
+                      transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
+                    >
+                      <SettingsView
+                        currentUser={currentUser}
+                        employees={employees}
+                        filteredEmployees={filteredEmployees}
+                        filters={filters}
+                        periods={periods}
+                        isDarkMode={isDarkMode}
+                        onToggleDarkMode={handleToggleDarkMode}
+                        onRefreshData={(newEmployees) => setEmployees(newEmployees)}
+                        onOpenImportModal={() => setIsImportModalOpen(true)}
+                        onUpdateCurrentUser={(updatedUser) => {
+                          saveSession(updatedUser);
+                          setCurrentUser(updatedUser);
+                        }}
+                      />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            </main>
           </div>
-        </main>
-      </div>
 
-      {/* MODAL IMPORT & CLOUD SYNC */}
-      <ImportSyncModal
-        isOpen={isImportModalOpen}
-        onClose={() => setIsImportModalOpen(false)}
-        currentEmployees={employees}
-        onApplySync={handleApplySync}
-      />
+          {/* MODAL IMPORT & CLOUD SYNC */}
+          <ImportSyncModal
+            isOpen={isImportModalOpen}
+            onClose={() => setIsImportModalOpen(false)}
+            currentEmployees={employees}
+            onApplySync={handleApplySync}
+          />
 
-      {/* MODAL GLOBAL EXCEL EXPORT CONFIRMATION */}
-      <ExportExcelConfirmModal
-        isOpen={isGlobalExcelModalOpen}
-        onClose={() => setIsGlobalExcelModalOpen(false)}
-        filteredEmployees={filteredEmployees}
-        allEmployees={employees}
-        filters={filters}
-        currentUser={currentUser}
-        onExportSuccess={(msg) => {
-          setToastNotification(msg);
-          setTimeout(() => setToastNotification(null), 5000);
-        }}
-      />
+          {/* MODAL GLOBAL EXCEL EXPORT CONFIRMATION */}
+          <ExportExcelConfirmModal
+            isOpen={isGlobalExcelModalOpen}
+            onClose={() => setIsGlobalExcelModalOpen(false)}
+            filteredEmployees={filteredEmployees}
+            allEmployees={employees}
+            filters={filters}
+            currentUser={currentUser}
+            onExportSuccess={(msg) => {
+              setToastNotification(msg);
+              setTimeout(() => setToastNotification(null), 5000);
+            }}
+          />
 
-      {/* MODAL GLOBAL PDF EXPORT (GAS FORMAT RESMI) */}
-      <ExportPdfModal
-        isOpen={isGlobalPdfModalOpen}
-        onClose={() => setIsGlobalPdfModalOpen(false)}
-        filteredEmployees={filteredEmployees}
-        allEmployees={employees}
-        filters={filters}
-        currentUser={currentUser}
-        onExportSuccess={(msg) => {
-          setToastNotification(msg);
-          setTimeout(() => setToastNotification(null), 5000);
-        }}
-      />
+          {/* MODAL GLOBAL PDF EXPORT (GAS FORMAT RESMI) */}
+          <ExportPdfModal
+            isOpen={isGlobalPdfModalOpen}
+            onClose={() => setIsGlobalPdfModalOpen(false)}
+            filteredEmployees={filteredEmployees}
+            allEmployees={employees}
+            filters={filters}
+            currentUser={currentUser}
+            onExportSuccess={(msg) => {
+              setToastNotification(msg);
+              setTimeout(() => setToastNotification(null), 5000);
+            }}
+          />
 
-      {/* GLOBAL RICH CONFIRMATION MODAL */}
-      <ConfirmationModal
-        isOpen={confirmModalConfig.isOpen}
-        title={confirmModalConfig.title}
-        description={confirmModalConfig.description}
-        confirmLabel={confirmModalConfig.confirmLabel}
-        cancelLabel={confirmModalConfig.cancelLabel}
-        variant={confirmModalConfig.variant}
-        icon={confirmModalConfig.icon}
-        singleAction={confirmModalConfig.singleAction}
-        isDarkMode={isDarkMode}
-        onConfirm={confirmModalConfig.onConfirm}
-        onCancel={() => setConfirmModalConfig((prev) => ({ ...prev, isOpen: false }))}
-      />
-    </div>
+          {/* GLOBAL RICH CONFIRMATION MODAL */}
+          <ConfirmationModal
+            isOpen={confirmModalConfig.isOpen}
+            title={confirmModalConfig.title}
+            description={confirmModalConfig.description}
+            confirmLabel={confirmModalConfig.confirmLabel}
+            cancelLabel={confirmModalConfig.cancelLabel}
+            variant={confirmModalConfig.variant}
+            icon={confirmModalConfig.icon}
+            singleAction={confirmModalConfig.singleAction}
+            isDarkMode={isDarkMode}
+            onConfirm={confirmModalConfig.onConfirm}
+            onCancel={() => setConfirmModalConfig((prev) => ({ ...prev, isOpen: false }))}
+          />
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }
