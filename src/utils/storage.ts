@@ -289,9 +289,9 @@ export async function checkLoginAsync(
         saveStoredUsers(users);
 
         return { success: true, session };
-      } else if (sbAuth.message && !sbAuth.message.includes('tidak terhubung')) {
-        // Explicit rejection from Supabase (e.g. wrong password or inactive)
-        return { success: false, message: sbAuth.message };
+      } else {
+        // If Supabase table doesn't exist, or user isn't in Supabase yet, log and fall through to Server & Local DB
+        console.warn('Supabase auth did not succeed, falling back to Server/Local DB:', sbAuth.message);
       }
     }
   } catch (sbErr) {
