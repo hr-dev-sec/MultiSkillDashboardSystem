@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { UserAccount, UserSession, UserScopeType } from '../types';
+import ConfirmationModal, { ConfirmationVariant } from './ConfirmationModal';
 import {
   fetchAllMasterUsers,
   createMasterUserAccount,
@@ -30,6 +31,7 @@ interface MasterUsersManagementProps {
   currentUser: UserSession;
   onRefreshSession?: (updatedUser: UserAccount) => void;
   onShowToast?: (message: string, type?: 'success' | 'error' | 'info') => void;
+  isDarkMode?: boolean;
 }
 
 const PRESET_ROLES = [
@@ -68,13 +70,36 @@ const PRESET_DEPARTMENTS = [
 export const MasterUsersManagement: React.FC<MasterUsersManagementProps> = ({
   currentUser,
   onRefreshSession,
-  onShowToast
+  onShowToast,
+  isDarkMode = false
 }) => {
   const [users, setUsers] = useState<UserAccount[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [filterRole, setFilterRole] = useState<string>('ALL');
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
+
+  // Confirmation Modal State (replaces all window.confirm / native dialogs)
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    description: string | React.ReactNode;
+    confirmLabel?: string;
+    cancelLabel?: string;
+    variant?: ConfirmationVariant;
+    icon?: string;
+    isLoading?: boolean;
+    onConfirm: () => void | Promise<void>;
+  }>({
+    isOpen: false,
+    title: '',
+    description: '',
+    confirmLabel: 'Konfirmasi',
+    cancelLabel: 'Batal',
+    variant: 'danger',
+    isLoading: false,
+    onConfirm: () => {}
+  });
 
   // Modal States
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
@@ -505,28 +530,64 @@ export const MasterUsersManagement: React.FC<MasterUsersManagementProps> = ({
     }
   };
 
-  // Delete User
-  const handleDeleteUser = async (user: UserAccount) => {
+  // Delete User with Custom UI Confirmation Modal
+  const handleDeleteUser = (user: UserAccount) => {
     if (user.username.toLowerCase() === 'hr_admin') {
       toast('Akun Super Administrator Utama (hr_admin) dilindungi dan tidak dapat dihapus.', 'error');
       return;
     }
 
-    if (!window.confirm(`Konfirmasi Hapus: Apakah Anda yakin ingin menghapus akun master "${user.name}" (@${user.username}) dari database server?`)) {
-      return;
-    }
+    setConfirmModal({
+      isOpen: true,
+      title: 'Hapus Akun Pengguna',
+      description: (
+        <div className="space-y-2.5">
+          <p className="text-slate-700 dark:text-slate-300">
+            Apakah Anda yakin ingin menghapus akun master pengguna berikut secara permanen?
+          </p>
+          <div className="p-3.5 rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-xs space-y-1">
+            <div className="font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+              <i className="fa-solid fa-user-circle text-amber-500"></i>
+              <span>{user.name}</span>
+              <span className="font-mono text-slate-500 dark:text-slate-400">(@{user.username})</span>
+            </div>
+            <div className="text-slate-600 dark:text-slate-400">
+              {user.role} &bull; {user.department}
+            </div>
+          </div>
+          <p className="text-xs text-rose-600 dark:text-rose-400 font-semibold flex items-center gap-1">
+            <i className="fa-solid fa-triangle-exclamation"></i>
+            <span>Tindakan ini akan menghapus akun dari Cloud Supabase &amp; database server.</span>
+          </p>
+        </div>
+      ),
+      confirmLabel: 'Hapus Akun',
+      cancelLabel: 'Batal',
+      variant: 'danger',
+      icon: 'fa-solid fa-trash-can',
+      isLoading: false,
+      onConfirm: async () => {
+        setConfirmModal((prev) => ({ ...prev, isLoading: true }));
+        try {
+          // Instantly filter out from UI state to guarantee immediate removal
+          setUsers((prev) => prev.filter((u) => u.username.toLowerCase() !== user.username.toLowerCase()));
 
-    try {
-      const res = await deleteMasterUserAccount(user.username, currentUser.username);
-      if (res.success) {
-        toast(`Akun @${user.username} berhasil dihapus dari database.`);
-        await loadUsersList();
-      } else {
-        toast(res.message || 'Gagal menghapus akun pengguna.', 'error');
+          const res = await deleteMasterUserAccount(user.username, currentUser.username);
+          if (res.success) {
+            toast(`Akun @${user.username} (${user.name}) berhasil dihapus.`);
+            await loadUsersList();
+          } else {
+            toast(res.message || 'Gagal menghapus akun pengguna.', 'error');
+            await loadUsersList();
+          }
+        } catch (err: any) {
+          toast(err?.message || 'Gagal menghapus akun pengguna.', 'error');
+          await loadUsersList();
+        } finally {
+          setConfirmModal((prev) => ({ ...prev, isOpen: false, isLoading: false }));
+        }
       }
-    } catch (err: any) {
-      toast(err?.message || 'Gagal menghapus akun pengguna.', 'error');
-    }
+    });
   };
 
   // Export JSON Master
@@ -2045,6 +2106,21 @@ export const MasterUsersManagement: React.FC<MasterUsersManagementProps> = ({
           </div>
         </div>
       )}
+
+      {/* Custom UI Confirmation Modal (Replaces all native alerts/confirms) */}
+      <ConfirmationModal
+        isOpen={confirmModal.isOpen}
+        title={confirmModal.title}
+        description={confirmModal.description}
+        confirmLabel={confirmModal.confirmLabel}
+        cancelLabel={confirmModal.cancelLabel}
+        variant={confirmModal.variant}
+        icon={confirmModal.icon}
+        isLoading={confirmModal.isLoading}
+        isDarkMode={isDarkMode}
+        onConfirm={confirmModal.onConfirm}
+        onCancel={() => setConfirmModal((prev) => ({ ...prev, isOpen: false }))}
+      />
     </div>
   );
 };

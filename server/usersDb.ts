@@ -196,34 +196,12 @@ export function initUsersDatabase(): UsersDatabaseSchema {
       parsed.users = DEFAULT_INITIAL_USERS_DB.users;
       persistUsersDatabase(parsed);
     } else {
-      // Ensure all default master accounts are present
-      let needsSave = false;
-      for (const defaultUser of DEFAULT_INITIAL_USERS_DB.users) {
-        const existingIdx = parsed.users.findIndex(
-          (u) => u.username.toLowerCase() === defaultUser.username.toLowerCase()
-        );
-        if (existingIdx === -1) {
-          parsed.users.push(defaultUser);
-          needsSave = true;
-        } else {
-          // Enrich missing fields if any
-          const current = parsed.users[existingIdx];
-          if (!current.divisi || !current.scopeType || !current.status) {
-            parsed.users[existingIdx] = {
-              ...defaultUser,
-              ...current,
-              divisi: current.divisi || defaultUser.divisi,
-              scopeType: current.scopeType || defaultUser.scopeType,
-              scopeValue: current.scopeValue || defaultUser.scopeValue,
-              status: current.status || defaultUser.status,
-              canEditCompetency: current.canEditCompetency !== undefined ? current.canEditCompetency : defaultUser.canEditCompetency,
-              canManageUsers: current.canManageUsers !== undefined ? current.canManageUsers : defaultUser.canManageUsers
-            };
-            needsSave = true;
-          }
-        }
-      }
-      if (needsSave) {
+      // Ensure super administrator hr_admin is always present
+      const hrAdminExists = parsed.users.some(
+        (u) => u.username.toLowerCase() === 'hr_admin'
+      );
+      if (!hrAdminExists) {
+        parsed.users.unshift(DEFAULT_INITIAL_USERS_DB.users[0]);
         persistUsersDatabase(parsed);
       }
     }

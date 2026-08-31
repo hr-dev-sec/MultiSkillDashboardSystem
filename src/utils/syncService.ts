@@ -63,7 +63,26 @@ export function getSupabaseConfig(): SupabaseConfig {
 
 export function saveSupabaseConfig(config: SupabaseConfig): void {
   try {
+    cachedClient = null;
+    cachedClientUrl = '';
+    cachedClientKey = '';
     localStorage.setItem(SUPABASE_CONFIG_KEY, JSON.stringify(config));
+
+    // Also persist Supabase configuration to centralized server database
+    // so any browser, incognito window, or new device automatically connects
+    fetch('/api/system/config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        supabaseConfig: {
+          url: config.url,
+          anonKey: config.anonKey,
+          tableName: config.tableName || 'employees_multi_skill'
+        }
+      })
+    }).catch((err) => {
+      console.warn('Could not persist Supabase config to server:', err);
+    });
   } catch (err) {
     console.error('Error saving Supabase config:', err);
   }
@@ -1770,8 +1789,7 @@ export async function fetchSupabaseUsers(config: SupabaseConfig): Promise<{ succ
 
     const { data, error } = await client
       .from(SUPABASE_USERS_TABLE)
-      .select('*')
-      .order('id', { ascending: true });
+      .select('*');
 
     if (error) {
       return {
@@ -2616,10 +2634,68 @@ export function downloadSampleUsersCsv(): void {
 }
 
 /**
- * Generate Supabase SQL DDL specifically for users table
+ * Generate Supabase SQL DDL specifically for users_accounts table
  */
 export function generateSupabaseSqlForUsersTable(): string {
-  return generateSupabaseSqlTable('employees_multi_skill');
+  return `-- =========================================================================
+-- SUPABASE POSTGRESQL DDL: TABEL MASTER AKUN PENGGUNA (users_accounts)
+-- Multi-Skill Monitoring System - PT Ajinomoto Indonesia
+-- Salin dan jalankan seluruh script ini di Supabase -> SQL Editor -> Run
+-- =========================================================================
+
+-- 1. Buat Tabel users_accounts
+CREATE TABLE IF NOT EXISTS public.users_accounts (
+  id BIGSERIAL PRIMARY KEY,
+  username VARCHAR(100) UNIQUE NOT NULL,
+  password VARCHAR(255) NOT NULL DEFAULT 'password123',
+  name VARCHAR(255) NOT NULL,
+  role VARCHAR(100) NOT NULL DEFAULT 'PIC Departemen',
+  department VARCHAR(255) DEFAULT '',
+  divisi VARCHAR(255) DEFAULT '',
+  scope_type VARCHAR(50) DEFAULT 'ALL',
+  scope_value VARCHAR(255) DEFAULT '',
+  status VARCHAR(20) DEFAULT 'ACTIVE',
+  email VARCHAR(255) DEFAULT '',
+  phone VARCHAR(50) DEFAULT '',
+  nik VARCHAR(50) DEFAULT '',
+  avatar_url TEXT DEFAULT '',
+  bio TEXT DEFAULT '',
+  signature_image TEXT DEFAULT '',
+  can_edit_competency BOOLEAN DEFAULT TRUE,
+  can_manage_users BOOLEAN DEFAULT FALSE,
+  last_login TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 2. Buat Index Pencarian Cepat
+CREATE INDEX IF NOT EXISTS idx_users_accounts_username ON public.users_accounts(username);
+CREATE INDEX IF NOT EXISTS idx_users_accounts_email ON public.users_accounts(email);
+CREATE INDEX IF NOT EXISTS idx_users_accounts_role ON public.users_accounts(role);
+CREATE INDEX IF NOT EXISTS idx_users_accounts_dept ON public.users_accounts(department);
+
+-- 3. Aktifkan Row Level Security (RLS)
+ALTER TABLE public.users_accounts ENABLE ROW LEVEL SECURITY;
+
+-- 4. Buat Kebijakan Akses (Policy)
+DROP POLICY IF EXISTS "Allow full access for authenticated and anon" ON public.users_accounts;
+CREATE POLICY "Allow full access for authenticated and anon" ON public.users_accounts
+  FOR ALL
+  USING (true)
+  WITH CHECK (true);
+
+-- 5. Insert Akun Default Awal
+INSERT INTO public.users_accounts (
+  username, password, name, role, department, divisi, scope_type, scope_value, status, email, phone, nik, bio, can_edit_competency, can_manage_users
+) VALUES
+  ('hr_admin', 'password123', 'Mahmud Nurdiansyah', 'HR Development Admin', 'Human Resources Development', 'Human Resources & Corporate Service', 'ALL', 'Semua Departemen', 'ACTIVE', 'mahmudnurdiansyah4@gmail.com', '0819-1932-7912', '122108091', 'Super Administrator Multi-Skill Monitoring Ajinomoto Mojokerto', TRUE, TRUE),
+  ('fermentasi_pic', 'fermentasi123', 'Budi Santoso, S.T.', 'PIC Departemen Fermentasi', 'Fermentation Department', 'Production FI (MSG)', 'DEPARTMENT', 'Fermentation Department', 'ACTIVE', 'budi.santoso@ajinomoto.co.id', '0812-3456-7890', '121904102', 'PIC Matriks Multi-Skill Bagian Fermentasi', TRUE, FALSE),
+  ('packaging_pic', 'packaging123', 'Siti Rahmawati', 'PIC Packaging & Filling', 'Packaging Department', 'Production FP (Food Products)', 'DEPARTMENT', 'Packaging Department', 'ACTIVE', 'siti.rahmawati@ajinomoto.co.id', '0813-9876-5432', '122005214', 'PIC Matriks Multi-Skill Bagian Packaging & Filling', TRUE, FALSE),
+  ('qa_pic', 'qa123456', 'Agus Setiawan, S.Si.', 'Quality Assurance PIC', 'Quality Assurance', 'Technical & QA', 'DEPARTMENT', 'Quality Assurance', 'ACTIVE', 'agus.setiawan@ajinomoto.co.id', '0815-6789-0123', '121803119', 'PIC Mutu Laboratorium & Analis Kimia-Mikro', TRUE, FALSE),
+  ('eng_supervisor', 'eng12345', 'Hendra Wijaya', 'Section Supervisor Maintenance', 'Engineering & Maintenance', 'Engineering & Utility', 'DEPARTMENT', 'Engineering & Maintenance', 'ACTIVE', 'hendra.wijaya@ajinomoto.co.id', '0821-4567-8901', '121702088', 'Supervisor Pemeliharaan Mesin & Utilitas', TRUE, FALSE),
+  ('mgmt_viewer', 'viewer123', 'Ir. Haryono', 'Executive Management Auditor', 'Factory Executive Office', 'Factory Management', 'ALL', 'Semua Departemen', 'ACTIVE', 'haryono.exec@ajinomoto.co.id', '0811-2233-4455', '119801001', 'Pemantau Eksekutif KPI Matriks Multi-Skill', FALSE, FALSE)
+ON CONFLICT (username) DO NOTHING;
+`;
 }
 
 /**

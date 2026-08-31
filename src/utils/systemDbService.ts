@@ -657,7 +657,10 @@ export async function fetchAllMasterUsers(): Promise<UserAccount[]> {
     const sbConfig = getSupabaseConfig();
     if (sbConfig && sbConfig.url && sbConfig.anonKey) {
       const sbRes = await fetchSupabaseUsers(sbConfig);
-      if (sbRes.success && sbRes.users && sbRes.users.length > 0) {
+      if (sbRes.success && Array.isArray(sbRes.users)) {
+        try {
+          localStorage.setItem('msm_users_v2', JSON.stringify(sbRes.users));
+        } catch (_) {}
         return sbRes.users;
       }
     }
@@ -669,7 +672,10 @@ export async function fetchAllMasterUsers(): Promise<UserAccount[]> {
   try {
     const res = await fetch('/api/users');
     const { ok, data } = await safeParseJson<{ success: boolean; users: UserAccount[] }>(res, 'Gagal memuat master user.');
-    if (ok && data?.success && Array.isArray(data.users) && data.users.length > 0) {
+    if (ok && data?.success && Array.isArray(data.users)) {
+      try {
+        localStorage.setItem('msm_users_v2', JSON.stringify(data.users));
+      } catch (_) {}
       return data.users;
     }
   } catch (err) {
@@ -681,7 +687,7 @@ export async function fetchAllMasterUsers(): Promise<UserAccount[]> {
     const raw = localStorage.getItem('msm_users_v2');
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed)) return parsed;
     }
   } catch (_) {}
 
@@ -866,7 +872,19 @@ export async function deleteMasterUserAccount(
   username: string,
   operatorUsername: string = 'hr_admin'
 ): Promise<{ success: boolean; message: string }> {
-  // 1. Delete from Supabase if configured
+  // 1. Immediately purge from localStorage so UI and cache never resurrect deleted user
+  try {
+    const raw = localStorage.getItem('msm_users_v2');
+    if (raw) {
+      const parsed: UserAccount[] = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        const filtered = parsed.filter(u => u.username.toLowerCase() !== username.toLowerCase());
+        localStorage.setItem('msm_users_v2', JSON.stringify(filtered));
+      }
+    }
+  } catch (_) {}
+
+  // 2. Delete from Supabase if configured
   try {
     const sbConfig = getSupabaseConfig();
     if (sbConfig && sbConfig.url && sbConfig.anonKey) {
@@ -876,7 +894,7 @@ export async function deleteMasterUserAccount(
     console.warn('Supabase delete user sync note:', sbErr);
   }
 
-  // 2. Delete from Server backend
+  // 3. Delete from Server backend
   try {
     const res = await fetch(`/api/users/${encodeURIComponent(username)}`, {
       method: 'DELETE',

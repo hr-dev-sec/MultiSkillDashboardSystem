@@ -811,6 +811,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       {activeSettingsTab === 'master_users' && (
         <MasterUsersManagement
           currentUser={currentUser}
+          isDarkMode={isDarkMode}
           onRefreshSession={(updated) => {
             const refreshed: UserSession = {
               ...currentUser,

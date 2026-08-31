@@ -128,6 +128,11 @@ export interface SystemConfig {
     ASM_SM: number;
     DEPT_MGR_UP: number;
   };
+  supabaseConfig?: {
+    url: string;
+    anonKey: string;
+    tableName: string;
+  };
   updatedAt: string;
 }
 

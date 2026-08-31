@@ -162,6 +162,24 @@ export async function syncSystemFromBackend(): Promise<{ users: UserAccount[]; c
     const initData = await fetchSystemInit();
     if (initData) {
       systemConfig = initData.config;
+      
+      // Auto-propagate Supabase config from Server to any fresh/incognito browser
+      if (initData.config?.supabaseConfig && initData.config.supabaseConfig.url && initData.config.supabaseConfig.anonKey) {
+        const localSb = getSupabaseConfig();
+        if (!localSb.url || !localSb.anonKey) {
+          try {
+            localStorage.setItem('msm_supabase_config_v1', JSON.stringify(initData.config.supabaseConfig));
+          } catch (_) {}
+
+          // Auto-fetch users directly from Supabase using server-persisted credentials
+          const sbUsersRes = await fetchSupabaseUsers(initData.config.supabaseConfig);
+          if (sbUsersRes.success && sbUsersRes.users && sbUsersRes.users.length > 0) {
+            syncedUsers = sbUsersRes.users;
+            saveStoredUsers(syncedUsers);
+          }
+        }
+      }
+
       if (syncedUsers.length === 0 && initData.users && initData.users.length > 0) {
         syncedUsers = initData.users;
         saveStoredUsers(syncedUsers);

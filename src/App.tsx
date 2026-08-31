@@ -160,18 +160,22 @@ export default function App() {
       setCurrentUser(session);
     }
 
-    // Always fetch latest persistent user accounts, profiles, photos, and system configuration from Server DB
-    syncSystemFromBackend().then((res) => {
-      if (res) {
-        const refreshedSession = getSession();
-        if (refreshedSession && refreshedSession.username) {
-          setCurrentUser(refreshedSession);
-        }
-      }
-    });
-
-    // Auto-fetch data from Supabase Cloud on boot (with automatic fallback to Google Sheets Live Master)
+    // Auto-fetch data from Supabase Cloud on boot across all browsers (with automatic fallback to Google Sheets Live Master)
     const autoSyncFromCloud = async () => {
+      // 1. First sync persistent config and profiles from Server DB
+      try {
+        const res = await syncSystemFromBackend();
+        if (res) {
+          const refreshedSession = getSession();
+          if (refreshedSession && refreshedSession.username) {
+            setCurrentUser(refreshedSession);
+          }
+        }
+      } catch (e) {
+        console.warn('System init backend note:', e);
+      }
+
+      // 2. Fetch employee data from Supabase Cloud automatically
       const config = getSupabaseConfig();
       let hasLoadedFromCloud = false;
 
