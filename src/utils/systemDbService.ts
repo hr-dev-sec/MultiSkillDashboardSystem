@@ -236,6 +236,27 @@ export async function serverChangePassword(
       'Gagal memperbarui password di server database.'
     );
 
+    const isSuccess = data?.success || (ok && !data);
+    if (isSuccess) {
+      // Sync to Supabase if configured
+      try {
+        const sbConfig = getSupabaseConfig();
+        if (sbConfig && sbConfig.url && sbConfig.anonKey) {
+          const userPayload: UserAccount = {
+            username: username.trim().toLowerCase(),
+            password: newPassword,
+            name: username,
+            role: 'User',
+            department: '',
+            updatedAt: new Date().toISOString()
+          };
+          pushUserToSupabase(sbConfig, userPayload).catch(() => {});
+        }
+      } catch (sbErr) {
+        console.warn('Supabase password sync note:', sbErr);
+      }
+    }
+
     if (data && typeof data.success === 'boolean') {
       return data;
     }
