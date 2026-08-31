@@ -29,6 +29,7 @@ import { SettingsView } from './components/SettingsView';
 import { ImportSyncModal } from './components/ImportSyncModal';
 import { ExportExcelConfirmModal } from './components/ExportExcelConfirmModal';
 import { ExportPdfModal } from './components/ExportPdfModal';
+import { RecipientDownloadModal } from './components/RecipientDownloadModal';
 import { ConfirmationModal, ConfirmationVariant } from './components/ConfirmationModal';
 
 export default function App() {
@@ -46,6 +47,18 @@ export default function App() {
   const [isGlobalExcelModalOpen, setIsGlobalExcelModalOpen] = useState(false);
   const [isGlobalPdfModalOpen, setIsGlobalPdfModalOpen] = useState(false);
   const [toastNotification, setToastNotification] = useState<string | null>(null);
+
+  // Recipient Magic Link Download Modal State
+  const [magicLinkParams, setMagicLinkParams] = useState<{
+    isOpen: boolean;
+    report?: string;
+    month?: string;
+    year?: string;
+    divisi?: string;
+    dept?: string;
+  }>({
+    isOpen: false
+  });
 
   // Global Confirmation & Alert Modal State
   const [confirmModalConfig, setConfirmModalConfig] = useState<{
@@ -228,6 +241,32 @@ export default function App() {
     };
 
     autoSyncFromCloud();
+  }, []);
+
+  // Check Magic Download Link params on load (?action=download-pdf)
+  useEffect(() => {
+    try {
+      const url = new URL(window.location.href);
+      const action = url.searchParams.get('action');
+      if (action === 'download-pdf') {
+        const report = url.searchParams.get('report') || 'comprehensive';
+        const month = url.searchParams.get('month') || '';
+        const year = url.searchParams.get('year') || '';
+        const divisi = url.searchParams.get('divisi') || '';
+        const dept = url.searchParams.get('dept') || '';
+
+        setMagicLinkParams({
+          isOpen: true,
+          report,
+          month,
+          year,
+          divisi,
+          dept
+        });
+      }
+    } catch (e) {
+      console.warn('Error reading URL params:', e);
+    }
   }, []);
 
   // Sync if postMessage received from parent window (e.g. GitHub Pages / GAS iframe wrapper)
@@ -689,6 +728,15 @@ export default function App() {
           />
         </motion.div>
       )}
+
+      {/* RECIPIENT MAGIC DOWNLOAD LINK MODAL */}
+      <RecipientDownloadModal
+        isOpen={magicLinkParams.isOpen}
+        onClose={() => setMagicLinkParams((prev) => ({ ...prev, isOpen: false }))}
+        employees={employees}
+        currentUser={currentUser}
+        urlParams={magicLinkParams}
+      />
     </AnimatePresence>
   );
 }

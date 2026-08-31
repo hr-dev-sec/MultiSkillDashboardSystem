@@ -1355,15 +1355,19 @@ export const ExportPdfModal: React.FC<ExportPdfModalProps> = ({
                                 </tr>
                               </thead>
                               <tbody>
-                                {byDivisi.slice(0, 4).map((d, i) => (
-                                  <tr key={i} className={i % 2 === 0 ? 'bg-slate-50' : 'bg-white'}>
-                                    <td className="p-1 font-semibold">{d.groupName}</td>
-                                    <td className="p-1 text-center">{d.total}</td>
-                                    <td className="p-1 text-center text-emerald-600 font-bold">{d.ms}</td>
-                                    <td className="p-1 text-center text-rose-600 font-bold">{d.us}</td>
-                                    <td className="p-1 text-right font-bold">{(d.percent * 100).toFixed(1)}%</td>
-                                  </tr>
-                                ))}
+                                {byDivisi.slice(0, 4).map((d, i) => {
+                                  const total = d.ms + d.us;
+                                  const pct = total > 0 ? (d.ms / total) * 100 : 0;
+                                  return (
+                                    <tr key={i} className={i % 2 === 0 ? 'bg-slate-50' : 'bg-white'}>
+                                      <td className="p-1 font-semibold">{d.label}</td>
+                                      <td className="p-1 text-center">{total}</td>
+                                      <td className="p-1 text-center text-emerald-600 font-bold">{d.ms}</td>
+                                      <td className="p-1 text-center text-rose-600 font-bold">{d.us}</td>
+                                      <td className="p-1 text-right font-bold">{pct.toFixed(1)}%</td>
+                                    </tr>
+                                  );
+                                })}
                               </tbody>
                             </table>
                           </div>
@@ -1377,18 +1381,22 @@ export const ExportPdfModal: React.FC<ExportPdfModalProps> = ({
                         <div className="grid grid-cols-2 gap-2">
                           <div className="border border-slate-200 rounded p-1.5">
                             <p className="font-bold text-[7.5px] mb-1 text-slate-700">Persebaran Grade</p>
-                            {byGrade.slice(0, 4).map((g, i) => (
-                              <div key={i} className="flex justify-between text-[7px] py-0.5 border-b border-slate-100">
-                                <span>{g.groupName}</span>
-                                <span className="font-bold">{(g.percent * 100).toFixed(1)}%</span>
-                              </div>
-                            ))}
+                            {byGrade.slice(0, 4).map((g, i) => {
+                              const total = g.ms + g.us;
+                              const pct = total > 0 ? (g.ms / total) * 100 : 0;
+                              return (
+                                <div key={i} className="flex justify-between text-[7px] py-0.5 border-b border-slate-100">
+                                  <span>{g.label}</span>
+                                  <span className="font-bold">{pct.toFixed(1)}%</span>
+                                </div>
+                              );
+                            })}
                           </div>
                           <div className="border border-slate-200 rounded p-1.5">
                             <p className="font-bold text-[7.5px] mb-1 text-slate-700">Top Departments</p>
                             {byDepartment.slice(0, 4).map((dp, i) => (
                               <div key={i} className="flex justify-between text-[7px] py-0.5 border-b border-slate-100">
-                                <span className="truncate max-w-[90px]">{dp.groupName}</span>
+                                <span className="truncate max-w-[90px]">{dp.label}</span>
                                 <span className="font-bold text-emerald-600">{dp.ms} MS</span>
                               </div>
                             ))}

@@ -375,14 +375,14 @@ export function generateCsvDataForEmail(employees: Employee[]): string {
   ];
 
   const rows = employees.map((emp) => {
-    const isMS = emp.isMultiSkill ? 'MS (Standar)' : 'US (Belum Standar)';
-    const score = emp.competencyScore !== undefined ? emp.competencyScore.toFixed(1) : '-';
+    const isMS = emp.result === 'MS' ? 'MS (Standar)' : 'US (Under Standard)';
+    const score = emp.totalScore !== undefined ? emp.totalScore.toFixed(1) : '-';
     return [
-      `"${emp.nik || ''}"`,
-      `"${emp.nama.replace(/"/g, '""')}"`,
+      `"${emp.empId || ''}"`,
+      `"${(emp.empName || '').replace(/"/g, '""')}"`,
       `"${emp.divisi || ''}"`,
       `"${emp.department || ''}"`,
-      `"${emp.jobPosition || ''}"`,
+      `"${emp.jabatan || ''}"`,
       `"${emp.grade || ''}"`,
       `"${emp.bulan || ''}"`,
       `"${emp.tahun || ''}"`,

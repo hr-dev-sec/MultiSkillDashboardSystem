@@ -30,7 +30,21 @@ import {
   generateCompleteSupabaseSqlSchema,
   generateGoogleAppsScriptForSheets
 } from '../utils/syncService';
-import { SmtpConfig, getSavedSmtpConfig, saveSmtpConfig, testSmtpConnection } from '../utils/emailReportService';
+import {
+  SmtpConfig,
+  AutomatedReportSchedule,
+  EmailHistoryItem,
+  getSavedSmtpConfig,
+  saveSmtpConfig,
+  testSmtpConnection,
+  getSavedEmailWebhookUrl,
+  saveEmailWebhookUrl,
+  getSavedScheduleConfig,
+  saveScheduleConfig,
+  getEmailHistory,
+  clearEmailHistory,
+  GAS_SCRIPT_CODE_TEMPLATE
+} from '../utils/emailReportService';
 import { ExportExcelConfirmModal } from './ExportExcelConfirmModal';
 import { ExportPdfModal } from './ExportPdfModal';
 import { ConfirmationModal, ConfirmationVariant } from './ConfirmationModal';
@@ -177,10 +191,22 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [isExcelModalOpen, setIsExcelModalOpen] = useState(false);
   const [exportToast, setExportToast] = useState<string | null>(null);
 
-  // 5. SMTP Server Configuration State
+  // 5. SMTP & Email Engine Configuration State
   const [smtpSettings, setSmtpSettings] = useState<SmtpConfig>(getSavedSmtpConfig());
   const [isTestingSmtp, setIsTestingSmtp] = useState(false);
   const [smtpAlert, setSmtpAlert] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  // 6. GAS Webhook Configuration State
+  const [gasWebhookUrl, setGasWebhookUrl] = useState<string>(getSavedEmailWebhookUrl());
+  const [gasAlert, setGasAlert] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [copiedGasScript, setCopiedGasScript] = useState(false);
+
+  // 7. Automated Schedule State
+  const [scheduleConfig, setScheduleConfig] = useState<AutomatedReportSchedule>(getSavedScheduleConfig());
+  const [scheduleAlert, setScheduleAlert] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  // 8. Email History Log State
+  const [emailLogs, setEmailLogs] = useState<EmailHistoryItem[]>(() => getEmailHistory());
 
   const handleSmtpSave = (e: React.FormEvent) => {
     e.preventDefault();
@@ -195,6 +221,35 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     const res = await testSmtpConnection(smtpSettings);
     setIsTestingSmtp(false);
     setSmtpAlert({ type: res.success ? 'success' : 'error', message: res.message });
+  };
+
+  const handleSaveGasWebhook = (e: React.FormEvent) => {
+    e.preventDefault();
+    saveEmailWebhookUrl(gasWebhookUrl);
+    setGasAlert({ type: 'success', message: 'URL Webhook Google Apps Script berhasil disimpan.' });
+    setTimeout(() => setGasAlert(null), 4000);
+  };
+
+  const handleSaveSchedule = (e: React.FormEvent) => {
+    e.preventDefault();
+    saveScheduleConfig(scheduleConfig);
+    setScheduleAlert({ type: 'success', message: 'Pengaturan Jadwal Pengiriman Otomatis berhasil disimpan.' });
+    setTimeout(() => setScheduleAlert(null), 4000);
+  };
+
+  const handleCopyGasScript = async () => {
+    try {
+      await navigator.clipboard.writeText(GAS_SCRIPT_CODE_TEMPLATE);
+      setCopiedGasScript(true);
+      setTimeout(() => setCopiedGasScript(false), 3000);
+    } catch (e) {
+      console.warn(e);
+    }
+  };
+
+  const handleClearEmailLogs = () => {
+    clearEmailHistory();
+    setEmailLogs([]);
   };
 
   // Handle Change Password
@@ -694,7 +749,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           }`}
         >
           <i className="fa-solid fa-envelope-circle-check text-sm"></i>
-          <span>Server Email SMTP</span>
+          <span>Email &amp; Otomasi Laporan</span>
         </button>
 
         <button
@@ -1684,10 +1739,223 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     </div>
   )}
 
-  {/* TAB 4: PENGATURAN SERVER EMAIL LANGSUNG & SMTP */}
+  {/* TAB 4: PENGATURAN SERVER EMAIL, GAS WEBHOOK & OTOMASI */}
   {activeSettingsTab === 'smtp' && (
     <div className="space-y-6">
-      {/* ROW 4: PENGATURAN SERVER EMAIL LANGSUNG & SMTP */}
+      {/* 1. GOOGLE APPS SCRIPT WEBHOOK ENGINE (SERVERLESS) */}
+      <div className="card-elegant p-6 border border-emerald-500/30 bg-gradient-to-br from-white via-white to-emerald-50/20 dark:from-slate-900 dark:via-slate-900 dark:to-emerald-950/20 space-y-4">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div>
+            <p className="eyebrow !text-emerald-600 dark:text-emerald-400 text-[10px] uppercase font-bold tracking-wider mb-1 flex items-center gap-1.5">
+              <i className="fa-solid fa-code-branch text-emerald-600 dark:text-emerald-400"></i> Google Apps Script Webhook Engine
+            </p>
+            <h3 className="section-title text-base sm:text-lg mb-1 flex items-center gap-2 text-slate-900 dark:text-white">
+              Kirim Email Resmi &amp; Lampiran PDF Serverless
+            </h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400 max-w-3xl leading-relaxed">
+              Kirim email laporan resmi, buat draft di Gmail, dan lampirkan file PDF / Excel secara otomatis via akun Google Workspace Pabrik tanpa perlu konfigurasi port SMTP yang rumit.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={handleCopyGasScript}
+              className="px-3.5 py-2 rounded-xl border border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-950/50 hover:bg-emerald-100 text-emerald-700 dark:text-emerald-300 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+            >
+              <i className={copiedGasScript ? "fa-solid fa-check text-emerald-600" : "fa-solid fa-copy text-emerald-600"}></i>
+              <span>{copiedGasScript ? 'Kode Disalin!' : 'Salin Kode GAS (Code.gs)'}</span>
+            </button>
+          </div>
+        </div>
+
+        {gasAlert && (
+          <div
+            className={`p-3 rounded-xl text-xs font-semibold flex items-center gap-2 animate-fadeIn ${
+              gasAlert.type === 'success'
+                ? 'bg-emerald-50 text-emerald-800 border border-emerald-300 dark:bg-emerald-950/40 dark:text-emerald-300'
+                : 'bg-rose-50 text-rose-800 border border-rose-300 dark:bg-rose-950/40 dark:text-rose-300'
+            }`}
+          >
+            <i className={`fa-solid ${gasAlert.type === 'success' ? 'fa-circle-check text-emerald-600' : 'fa-circle-exclamation text-rose-600'}`}></i>
+            <span>{gasAlert.message}</span>
+          </div>
+        )}
+
+        <form onSubmit={handleSaveGasWebhook} className="space-y-3 pt-1">
+          <div>
+            <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+              Google Apps Script Web App Deployment URL:
+            </label>
+            <input
+              type="url"
+              value={gasWebhookUrl}
+              onChange={(e) => setGasWebhookUrl(e.target.value)}
+              placeholder="https://script.google.com/macros/s/AKfycbx.../exec"
+              className="input-elegant w-full px-3.5 py-2.5 text-xs font-mono"
+            />
+          </div>
+
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
+            <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+              <i className="fa-solid fa-circle-info text-blue-500"></i>
+              <span>Pastikan Web App di-deploy dengan opsi: <em>"Execute as: Me"</em> dan <em>"Who has access: Anyone"</em>.</span>
+            </div>
+
+            <button
+              type="submit"
+              className="px-5 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-2 shadow-xs cursor-pointer transition shrink-0"
+            >
+              <i className="fa-solid fa-floppy-disk"></i>
+              <span>Simpan Webhook URL</span>
+            </button>
+          </div>
+        </form>
+      </div>
+
+      {/* 2. JADWAL PENGIRIMAN LAPORAN OTOMATIS */}
+      <div className="card-elegant p-6 border border-blue-500/30 bg-gradient-to-br from-white via-white to-blue-50/20 dark:from-slate-900 dark:via-slate-900 dark:to-blue-950/20 space-y-4">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div>
+            <p className="eyebrow !text-blue-600 dark:text-blue-400 text-[10px] uppercase font-bold tracking-wider mb-1 flex items-center gap-1.5">
+              <i className="fa-solid fa-calendar-check text-blue-600 dark:text-blue-400"></i> Scheduled Automated Dispatcher
+            </p>
+            <h3 className="section-title text-base sm:text-lg mb-1 flex items-center gap-2 text-slate-900 dark:text-white">
+              Jadwal Pengiriman Laporan Berkala ke Manajemen
+            </h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400 max-w-3xl leading-relaxed">
+              Atur jadwal otomatis untuk mengirimkan rekap matriks multi-skill karyawan secara rutin setiap awal bulan atau hari tertentu ke daftar pimpinan.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <span className={`px-3 py-1 rounded-full text-xs font-bold ${scheduleConfig.enabled ? 'bg-emerald-100 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800' : 'bg-slate-100 dark:bg-slate-800 text-slate-500'}`}>
+              {scheduleConfig.enabled ? '● Jadwal Aktif' : '○ Nonaktif'}
+            </span>
+          </div>
+        </div>
+
+        {scheduleAlert && (
+          <div
+            className={`p-3 rounded-xl text-xs font-semibold flex items-center gap-2 animate-fadeIn ${
+              scheduleAlert.type === 'success'
+                ? 'bg-emerald-50 text-emerald-800 border border-emerald-300 dark:bg-emerald-950/40 dark:text-emerald-300'
+                : 'bg-rose-50 text-rose-800 border border-rose-300 dark:bg-rose-950/40 dark:text-rose-300'
+            }`}
+          >
+            <i className={`fa-solid ${scheduleAlert.type === 'success' ? 'fa-circle-check text-emerald-600' : 'fa-circle-exclamation text-rose-600'}`}></i>
+            <span>{scheduleAlert.message}</span>
+          </div>
+        )}
+
+        <form onSubmit={handleSaveSchedule} className="space-y-4 pt-1">
+          <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 space-y-3">
+            <label className="flex items-center gap-2 cursor-pointer font-bold text-xs text-slate-800 dark:text-slate-200">
+              <input
+                type="checkbox"
+                checked={scheduleConfig.enabled}
+                onChange={(e) => setScheduleConfig({ ...scheduleConfig, enabled: e.target.checked })}
+                className="rounded text-blue-600"
+              />
+              <span>Aktifkan Pengiriman Laporan Berkala Terjadwal</span>
+            </label>
+
+            {scheduleConfig.enabled && (
+              <div className="space-y-3 pt-3 border-t border-slate-200 dark:border-slate-700">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1">
+                      Frekuensi Pengiriman:
+                    </label>
+                    <select
+                      value={scheduleConfig.frequency}
+                      onChange={(e) => setScheduleConfig({ ...scheduleConfig, frequency: e.target.value as any })}
+                      className="input-elegant w-full px-3 py-2 text-xs"
+                    >
+                      <option value="monthly">Bulanan (Setiap Awal Bulan)</option>
+                      <option value="weekly">Mingguan (Setiap Hari Tertentu)</option>
+                      <option value="daily">Harian (Setiap Pagi)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1">
+                      {scheduleConfig.frequency === 'monthly' ? 'Tanggal Eksekusi (1-28):' : 'Hari / Jadwal:'}
+                    </label>
+                    {scheduleConfig.frequency === 'monthly' ? (
+                      <input
+                        type="number"
+                        min={1}
+                        max={28}
+                        value={scheduleConfig.dayOfMonth || 1}
+                        onChange={(e) => setScheduleConfig({ ...scheduleConfig, dayOfMonth: Number(e.target.value) || 1 })}
+                        className="input-elegant w-full px-3 py-2 text-xs"
+                      />
+                    ) : (
+                      <select
+                        value={scheduleConfig.dayOfWeek || 1}
+                        onChange={(e) => setScheduleConfig({ ...scheduleConfig, dayOfWeek: Number(e.target.value) || 1 })}
+                        className="input-elegant w-full px-3 py-2 text-xs"
+                      >
+                        <option value={1}>Senin (Pukul 08:00 WIB)</option>
+                        <option value={2}>Selasa (Pukul 08:00 WIB)</option>
+                        <option value={3}>Rabu (Pukul 08:00 WIB)</option>
+                        <option value={4}>Kamis (Pukul 08:00 WIB)</option>
+                        <option value={5}>Jumat (Pukul 08:00 WIB)</option>
+                      </select>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1">
+                      Format Lampiran:
+                    </label>
+                    <select
+                      value={scheduleConfig.format}
+                      onChange={(e) => setScheduleConfig({ ...scheduleConfig, format: e.target.value as any })}
+                      className="input-elegant w-full px-3 py-2 text-xs"
+                    >
+                      <option value="pdf">Laporan Resmi PDF</option>
+                      <option value="excel">Data Mentah Matriks (Excel/CSV)</option>
+                      <option value="both">Keduanya (PDF + Excel)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1">
+                    Daftar Email Penerima (Pisahkan dengan koma):
+                  </label>
+                  <input
+                    type="text"
+                    value={scheduleConfig.recipients.join(', ')}
+                    onChange={(e) =>
+                      setScheduleConfig({
+                        ...scheduleConfig,
+                        recipients: e.target.value.split(',').map((s) => s.trim()).filter(Boolean)
+                      })
+                    }
+                    placeholder="factory.head@ajinomoto.co.id, hr.dept@ajinomoto.co.id"
+                    className="input-elegant w-full px-3 py-2 text-xs font-mono"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-end">
+            <button
+              type="submit"
+              className="px-5 py-2 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-2 shadow-xs cursor-pointer transition"
+            >
+              <i className="fa-solid fa-floppy-disk"></i>
+              <span>Simpan Jadwal Otomatis</span>
+            </button>
+          </div>
+        </form>
+      </div>
+
+      {/* 3. KONFIGURASI SERVER SMTP ENTERPRISE */}
       <div className="card-elegant p-6 border border-indigo-500/30 bg-gradient-to-br from-white via-white to-indigo-50/20 dark:from-slate-900 dark:via-slate-900 dark:to-indigo-950/20 space-y-4">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div>
@@ -1846,7 +2114,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <div className="p-3 rounded-xl bg-blue-50/60 dark:bg-blue-950/30 border border-blue-200/60 dark:border-blue-900/60 text-xs text-slate-600 dark:text-slate-300 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <i className="fa-solid fa-circle-check text-blue-600"></i>
-                  <span>Sistem aktif menggunakan <strong>Direct System Dispatcher</strong> bawaan.</span>
+                  <span>Sistem aktif menggunakan <strong>Direct Hybrid Dispatcher</strong> bawaan.</span>
                 </div>
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 font-bold">
                   Siap Kirim
@@ -1865,6 +2133,85 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </button>
           </div>
         </form>
+      </div>
+
+      {/* 4. RIWAYAT PENGIRIMAN EMAIL (AUDIT TRAIL) */}
+      <div className="card-elegant p-6 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+          <div>
+            <h4 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
+              <i className="fa-solid fa-clock-rotate-left text-slate-500"></i>
+              <span>Riwayat Pengiriman Laporan Email</span>
+            </h4>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              Log aktivitas pengiriman laporan PDF matriks kompetensi melalui berbagai kanal.
+            </p>
+          </div>
+
+          {emailLogs.length > 0 && (
+            <button
+              type="button"
+              onClick={handleClearEmailLogs}
+              className="text-xs text-rose-600 hover:text-rose-700 font-bold cursor-pointer transition flex items-center gap-1"
+            >
+              <i className="fa-solid fa-trash text-[10px]"></i>
+              <span>Bersihkan Riwayat</span>
+            </button>
+          )}
+        </div>
+
+        {emailLogs.length === 0 ? (
+          <div className="text-center py-6 text-slate-400 text-xs">
+            <i className="fa-regular fa-envelope-open text-2xl mb-2 opacity-50 block"></i>
+            <span>Belum ada riwayat email yang tercatat.</span>
+          </div>
+        ) : (
+          <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold border-b border-slate-200 dark:border-slate-700">
+                <tr>
+                  <th className="py-2.5 px-3">Waktu</th>
+                  <th className="py-2.5 px-3">Metode</th>
+                  <th className="py-2.5 px-3">Penerima</th>
+                  <th className="py-2.5 px-3">Subjek Laporan</th>
+                  <th className="py-2.5 px-3">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                {emailLogs.map((log) => (
+                  <tr key={log.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50">
+                    <td className="py-2 px-3 text-slate-400 font-mono text-[11px] whitespace-nowrap">
+                      {new Date(log.timestamp).toLocaleString('id-ID', {
+                        day: '2-digit',
+                        month: 'short',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                      })}
+                    </td>
+                    <td className="py-2 px-3 whitespace-nowrap font-bold text-slate-700 dark:text-slate-300">
+                      {log.method}
+                    </td>
+                    <td className="py-2 px-3 font-mono text-slate-800 dark:text-slate-200">
+                      {log.recipient}
+                    </td>
+                    <td className="py-2 px-3 text-slate-600 dark:text-slate-300 max-w-[200px] truncate">
+                      {log.subject}
+                    </td>
+                    <td className="py-2 px-3 whitespace-nowrap">
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        log.status === 'success'
+                          ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300'
+                          : 'bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300'
+                      }`}>
+                        {log.status === 'success' ? 'Terkirim / Diproses' : 'Gagal'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   )}
