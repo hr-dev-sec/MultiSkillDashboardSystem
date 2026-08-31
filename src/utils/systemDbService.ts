@@ -1,4 +1,10 @@
 import { UserAccount, UserSession, SystemConfig, ActivityLog, EmailLog } from '../types';
+import {
+  getSupabaseConfig,
+  fetchSupabaseUsers,
+  pushUserToSupabase,
+  deleteUserFromSupabase
+} from './syncService';
 
 export interface SystemInitData {
   users: UserAccount[];
@@ -643,29 +649,84 @@ export async function importUsersDatabase(
 }
 
 /**
- * Fetch all master user accounts from Server Database
+ * Fetch all master user accounts with Supabase priority and server database fallback
  */
 export async function fetchAllMasterUsers(): Promise<UserAccount[]> {
+  // 1. Try Supabase first if configured
+  try {
+    const sbConfig = getSupabaseConfig();
+    if (sbConfig && sbConfig.url && sbConfig.anonKey) {
+      const sbRes = await fetchSupabaseUsers(sbConfig);
+      if (sbRes.success && sbRes.users && sbRes.users.length > 0) {
+        return sbRes.users;
+      }
+    }
+  } catch (err) {
+    console.warn('Supabase users fetch skipped/failed:', err);
+  }
+
+  // 2. Try Server backend
   try {
     const res = await fetch('/api/users');
     const { ok, data } = await safeParseJson<{ success: boolean; users: UserAccount[] }>(res, 'Gagal memuat master user.');
-    if (ok && data?.success && Array.isArray(data.users)) {
+    if (ok && data?.success && Array.isArray(data.users) && data.users.length > 0) {
       return data.users;
     }
-    return [];
   } catch (err) {
-    console.error('Error fetching master users list:', err);
-    return [];
+    console.error('Error fetching master users list from server:', err);
   }
+
+  // 3. Fallback to localStorage
+  try {
+    const raw = localStorage.getItem('msm_users_v2');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (_) {}
+
+  return [];
 }
 
 /**
- * Admin: Create new user account in server database
+ * Admin: Create new user account in Supabase and server database
  */
 export async function createMasterUserAccount(
   userData: Partial<UserAccount> & { password: string },
   creatorUsername: string = 'hr_admin'
 ): Promise<{ success: boolean; message: string; user?: UserAccount }> {
+  // 1. Sync to Supabase if configured
+  try {
+    const sbConfig = getSupabaseConfig();
+    if (sbConfig && sbConfig.url && sbConfig.anonKey && userData.username) {
+      const userPayload: UserAccount = {
+        username: userData.username.trim().toLowerCase(),
+        password: userData.password,
+        name: userData.name || userData.username,
+        role: userData.role || 'HR Development Admin',
+        department: userData.department || 'Human Resources Development',
+        divisi: userData.divisi || 'Human Resources & Corporate Service',
+        scopeType: userData.scopeType || 'ALL',
+        scopeValue: userData.scopeValue || 'Semua Departemen',
+        status: userData.status || 'ACTIVE',
+        email: userData.email || '',
+        phone: userData.phone || '',
+        nik: userData.nik || '',
+        bio: userData.bio || '',
+        avatarUrl: userData.avatarUrl || '',
+        signatureImage: userData.signatureImage || '',
+        canEditCompetency: userData.canEditCompetency !== undefined ? userData.canEditCompetency : true,
+        canManageUsers: userData.canManageUsers !== undefined ? userData.canManageUsers : (userData.username.toLowerCase() === 'hr_admin'),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      await pushUserToSupabase(sbConfig, userPayload);
+    }
+  } catch (sbErr) {
+    console.warn('Supabase user create sync note:', sbErr);
+  }
+
+  // 2. Sync to Server backend
   try {
     const res = await fetch('/api/users', {
       method: 'POST',
@@ -689,13 +750,44 @@ export async function createMasterUserAccount(
 }
 
 /**
- * Admin: Update user account in server database
+ * Admin: Update user account in Supabase and server database
  */
 export async function adminUpdateMasterUser(
   username: string,
   updates: Partial<UserAccount> & { newPassword?: string },
   operatorUsername: string = 'hr_admin'
 ): Promise<{ success: boolean; message: string; user?: UserAccount }> {
+  // 1. Sync to Supabase if configured
+  try {
+    const sbConfig = getSupabaseConfig();
+    if (sbConfig && sbConfig.url && sbConfig.anonKey) {
+      const userPayload: UserAccount = {
+        username: username.trim().toLowerCase(),
+        password: updates.newPassword || updates.password || 'password123',
+        name: updates.name || username,
+        role: updates.role || 'HR Development Admin',
+        department: updates.department || 'Human Resources Development',
+        divisi: updates.divisi || 'Human Resources & Corporate Service',
+        scopeType: updates.scopeType || 'ALL',
+        scopeValue: updates.scopeValue || 'Semua Departemen',
+        status: updates.status || 'ACTIVE',
+        email: updates.email || '',
+        phone: updates.phone || '',
+        nik: updates.nik || '',
+        bio: updates.bio || '',
+        avatarUrl: updates.avatarUrl || '',
+        signatureImage: updates.signatureImage || '',
+        canEditCompetency: updates.canEditCompetency !== undefined ? updates.canEditCompetency : true,
+        canManageUsers: updates.canManageUsers !== undefined ? updates.canManageUsers : (username.toLowerCase() === 'hr_admin'),
+        updatedAt: new Date().toISOString()
+      };
+      await pushUserToSupabase(sbConfig, userPayload);
+    }
+  } catch (sbErr) {
+    console.warn('Supabase user update sync note:', sbErr);
+  }
+
+  // 2. Sync to Server backend
   try {
     const res = await fetch(`/api/users/${encodeURIComponent(username)}/admin-update`, {
       method: 'PUT',
@@ -719,13 +811,32 @@ export async function adminUpdateMasterUser(
 }
 
 /**
- * Admin: Reset user password in server database
+ * Admin: Reset user password in Supabase and server database
  */
 export async function adminResetUserPasswordApi(
   username: string,
   newPassword: string,
   operatorUsername: string = 'hr_admin'
 ): Promise<{ success: boolean; message: string }> {
+  // 1. Sync to Supabase if configured
+  try {
+    const sbConfig = getSupabaseConfig();
+    if (sbConfig && sbConfig.url && sbConfig.anonKey) {
+      const userPayload: UserAccount = {
+        username: username.trim().toLowerCase(),
+        password: newPassword,
+        name: username,
+        role: 'User',
+        department: '',
+        updatedAt: new Date().toISOString()
+      };
+      await pushUserToSupabase(sbConfig, userPayload);
+    }
+  } catch (sbErr) {
+    console.warn('Supabase password reset sync note:', sbErr);
+  }
+
+  // 2. Sync to Server backend
   try {
     const res = await fetch(`/api/users/${encodeURIComponent(username)}/reset-password`, {
       method: 'POST',
@@ -749,12 +860,23 @@ export async function adminResetUserPasswordApi(
 }
 
 /**
- * Admin: Delete user account from server database
+ * Admin: Delete user account from Supabase and server database
  */
 export async function deleteMasterUserAccount(
   username: string,
   operatorUsername: string = 'hr_admin'
 ): Promise<{ success: boolean; message: string }> {
+  // 1. Delete from Supabase if configured
+  try {
+    const sbConfig = getSupabaseConfig();
+    if (sbConfig && sbConfig.url && sbConfig.anonKey) {
+      await deleteUserFromSupabase(sbConfig, username);
+    }
+  } catch (sbErr) {
+    console.warn('Supabase delete user sync note:', sbErr);
+  }
+
+  // 2. Delete from Server backend
   try {
     const res = await fetch(`/api/users/${encodeURIComponent(username)}`, {
       method: 'DELETE',

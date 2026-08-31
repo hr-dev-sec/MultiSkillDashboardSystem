@@ -12,6 +12,19 @@ import {
   resetUsersDatabase
 } from '../utils/systemDbService';
 import { saveStoredUsers, getStoredUsers } from '../utils/storage';
+import {
+  getSupabaseConfig,
+  saveSupabaseConfig,
+  fetchSupabaseUsers,
+  pushAllUsersToSupabase,
+  generateSupabaseSqlForUsersTable,
+  generateGoogleAppsScriptForUsersManagement,
+  downloadSampleUsersCsv,
+  fetchGoogleSheetUsers,
+  getSavedGoogleSheetUrl,
+  saveGoogleSheetUrl,
+  SupabaseConfig
+} from '../utils/syncService';
 
 interface MasterUsersManagementProps {
   currentUser: UserSession;
@@ -91,11 +104,150 @@ export const MasterUsersManagement: React.FC<MasterUsersManagementProps> = ({
   // Quick reset password state
   const [newResetPassword, setNewResetPassword] = useState('');
 
+  // Cloud & Supabase & GAS Sync States
+  const [showSqlModal, setShowSqlModal] = useState<boolean>(false);
+  const [showGasModal, setShowGasModal] = useState<boolean>(false);
+  const [showCloudConfigModal, setShowCloudConfigModal] = useState<boolean>(false);
+  const [isCloudSyncing, setIsCloudSyncing] = useState<boolean>(false);
+  const [cloudSyncStatus, setCloudSyncStatus] = useState<{ type: 'idle' | 'success' | 'error'; message: string }>({
+    type: 'idle',
+    message: ''
+  });
+
+  // Supabase Config state
+  const [sbConfig, setSbConfig] = useState<SupabaseConfig>(getSupabaseConfig());
+  const [gsUrl, setGsUrl] = useState<string>(getSavedGoogleSheetUrl());
+
   // Toast Helper
   const toast = (msg: string, type: 'success' | 'error' | 'info' = 'success') => {
     if (onShowToast) {
       onShowToast(msg, type);
     }
+  };
+
+  // Push all users directly to Supabase
+  const handlePushAllToSupabase = async () => {
+    if (!sbConfig.url || !sbConfig.anonKey) {
+      setShowCloudConfigModal(true);
+      toast('Silakan konfigurasikan URL dan Anon Key Supabase terlebih dahulu.', 'info');
+      return;
+    }
+
+    setIsCloudSyncing(true);
+    setCloudSyncStatus({ type: 'idle', message: 'Mengunggah seluruh data master user ke Supabase cloud...' });
+
+    try {
+      const currentUsers = users.length > 0 ? users : getStoredUsers();
+      const res = await pushAllUsersToSupabase(sbConfig, currentUsers);
+      setIsCloudSyncing(false);
+      if (res.success) {
+        setCloudSyncStatus({ type: 'success', message: res.message });
+        toast(res.message, 'success');
+      } else {
+        setCloudSyncStatus({ type: 'error', message: res.message });
+        toast(res.message, 'error');
+      }
+    } catch (err: any) {
+      setIsCloudSyncing(false);
+      setCloudSyncStatus({ type: 'error', message: err?.message || 'Gagal sinkronisasi ke Supabase.' });
+      toast(err?.message || 'Gagal sinkronisasi ke Supabase.', 'error');
+    }
+  };
+
+  // Pull users from Supabase
+  const handlePullFromSupabase = async () => {
+    if (!sbConfig.url || !sbConfig.anonKey) {
+      setShowCloudConfigModal(true);
+      toast('Silakan konfigurasikan URL dan Anon Key Supabase terlebih dahulu.', 'info');
+      return;
+    }
+
+    setIsCloudSyncing(true);
+    setCloudSyncStatus({ type: 'idle', message: 'Mengambil akun master user dari Supabase cloud...' });
+
+    try {
+      const res = await fetchSupabaseUsers(sbConfig);
+      setIsCloudSyncing(false);
+      if (res.success && res.users && res.users.length > 0) {
+        setUsers(res.users);
+        saveStoredUsers(res.users);
+        setCloudSyncStatus({ type: 'success', message: res.message });
+        toast(res.message, 'success');
+      } else {
+        setCloudSyncStatus({ type: 'error', message: res.message || 'Tidak ada user ditemukan di Supabase.' });
+        toast(res.message || 'Tidak ada user ditemukan di Supabase.', 'error');
+      }
+    } catch (err: any) {
+      setIsCloudSyncing(false);
+      setCloudSyncStatus({ type: 'error', message: err?.message || 'Gagal mengambil data dari Supabase.' });
+      toast(err?.message || 'Gagal mengambil data dari Supabase.', 'error');
+    }
+  };
+
+  // Pull users from Google Sheet USER_ACCOUNTS tab
+  const handlePullFromGoogleSheet = async () => {
+    if (!gsUrl) {
+      setShowCloudConfigModal(true);
+      toast('Silakan masukkan Link Google Sheets terlebih dahulu.', 'info');
+      return;
+    }
+
+    setIsCloudSyncing(true);
+    setCloudSyncStatus({ type: 'idle', message: 'Menghubungkan ke Google Sheets tab USER_ACCOUNTS...' });
+
+    try {
+      const res = await fetchGoogleSheetUsers(gsUrl);
+      setIsCloudSyncing(false);
+      if (res.success && res.users && res.users.length > 0) {
+        setUsers(res.users);
+        saveStoredUsers(res.users);
+        setCloudSyncStatus({ type: 'success', message: res.message });
+        toast(res.message, 'success');
+      } else {
+        setCloudSyncStatus({ type: 'error', message: res.message || 'Gagal membaca tab USER_ACCOUNTS dari Google Sheets.' });
+        toast(res.message || 'Gagal membaca tab USER_ACCOUNTS.', 'error');
+      }
+    } catch (err: any) {
+      setIsCloudSyncing(false);
+      setCloudSyncStatus({ type: 'error', message: err?.message || 'Gagal membaca Google Sheets.' });
+      toast(err?.message || 'Gagal membaca Google Sheets.', 'error');
+    }
+  };
+
+  // Download Google Apps Script (Code.gs)
+  const handleDownloadGasScript = () => {
+    try {
+      const scriptCode = generateGoogleAppsScriptForUsersManagement();
+      const blob = new Blob([scriptCode], { type: 'text/javascript' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Ajinomoto_GoogleAppsScript_UserAccounts_Setup_${new Date().toISOString().slice(0, 10)}.js`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast('File script Google Apps Script (Code.js) berhasil diunduh.');
+    } catch (err: any) {
+      toast('Gagal mengunduh script: ' + err?.message, 'error');
+    }
+  };
+
+  // Download CSV template
+  const handleDownloadCsvTemplate = () => {
+    try {
+      downloadSampleUsersCsv();
+      toast('Template master akun CSV berhasil diunduh.');
+    } catch (err: any) {
+      toast('Gagal mengunduh template CSV.', 'error');
+    }
+  };
+
+  // Save Cloud Configuration
+  const handleSaveCloudConfig = (e: React.FormEvent) => {
+    e.preventDefault();
+    saveSupabaseConfig(sbConfig);
+    saveGoogleSheetUrl(gsUrl);
+    setShowCloudConfigModal(false);
+    toast('Konfigurasi Cloud Supabase & Google Sheets berhasil disimpan.');
   };
 
   // Load Users from Server Database (with local fallback)
@@ -498,6 +650,159 @@ export const MasterUsersManagement: React.FC<MasterUsersManagementProps> = ({
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Cloud Supabase & Google Sheets Multi-Database Synchronization Hub */}
+      <div className="rounded-2xl p-5 bg-gradient-to-br from-indigo-950/40 via-slate-900 to-slate-900 border border-indigo-500/30 text-white shadow-lg space-y-4">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="px-2.5 py-0.5 rounded text-[10.5px] font-extrabold bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 flex items-center gap-1.5">
+                <i className="fa-solid fa-cloud-arrow-up text-indigo-400"></i>
+                Cloud Multi-Browser & Incognito Synchronization
+              </span>
+              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                Supabase &amp; Google Sheets Ready
+              </span>
+            </div>
+            <h3 className="text-base sm:text-lg font-black text-white flex items-center gap-2">
+              <span>Sinkronisasi Cloud Akun Pengguna</span>
+            </h3>
+            <p className="text-xs text-slate-300 max-w-3xl leading-relaxed">
+              Jadikan akun master persisten di seluruh browser dan mode incognito dengan sinkronisasi ke cloud <strong>Supabase</strong> (PostgreSQL) serta lembar kerja <strong>Google Sheets</strong> (tab <code className="text-amber-300 font-mono">USER_ACCOUNTS</code>).
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            {/* Push to Supabase */}
+            <button
+              type="button"
+              onClick={handlePushAllToSupabase}
+              disabled={isCloudSyncing}
+              className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs flex items-center gap-2 shadow-md transition active:scale-95 cursor-pointer disabled:opacity-50"
+              title="Unggah dan timpa seluruh daftar user master ke database Supabase Cloud"
+            >
+              <i className={`fa-solid ${isCloudSyncing ? 'fa-spinner animate-spin' : 'fa-cloud-arrow-up text-emerald-200'}`}></i>
+              <span>Unggah ke Supabase</span>
+            </button>
+
+            {/* Pull from Supabase */}
+            <button
+              type="button"
+              onClick={handlePullFromSupabase}
+              disabled={isCloudSyncing}
+              className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-indigo-400/40 font-bold text-xs flex items-center gap-2 shadow-xs transition cursor-pointer disabled:opacity-50"
+              title="Ambil dan sinkronkan daftar user dari Supabase Cloud"
+            >
+              <i className="fa-solid fa-cloud-arrow-down text-indigo-400"></i>
+              <span>Tarik dari Supabase</span>
+            </button>
+
+            {/* Pull from Google Sheet */}
+            <button
+              type="button"
+              onClick={handlePullFromGoogleSheet}
+              disabled={isCloudSyncing}
+              className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-emerald-500/40 font-bold text-xs flex items-center gap-2 shadow-xs transition cursor-pointer disabled:opacity-50"
+              title="Tarik akun pengguna dari Google Sheets tab USER_ACCOUNTS"
+            >
+              <i className="fa-solid fa-file-excel text-emerald-400"></i>
+              <span>Tarik Google Sheet</span>
+            </button>
+
+            {/* Settings & Config */}
+            <button
+              type="button"
+              onClick={() => setShowCloudConfigModal(true)}
+              className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-bold transition cursor-pointer"
+              title="Pengaturan API Supabase & Link Google Sheets"
+            >
+              <i className="fa-solid fa-gear text-slate-300"></i>
+            </button>
+          </div>
+        </div>
+
+        {/* Secondary Tool Shortcuts */}
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-800 text-xs">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[11px] text-slate-400 font-semibold">Skrip &amp; Generator:</span>
+            
+            {/* View SQL Schema */}
+            <button
+              type="button"
+              onClick={() => setShowSqlModal(true)}
+              className="px-2.5 py-1 rounded-lg bg-indigo-900/50 hover:bg-indigo-800/60 text-indigo-300 border border-indigo-700/60 text-[11px] font-bold flex items-center gap-1.5 transition cursor-pointer"
+            >
+              <i className="fa-solid fa-database text-[10px]"></i>
+              <span>Skema SQL Supabase (DDL)</span>
+            </button>
+
+            {/* View Google Apps Script */}
+            <button
+              type="button"
+              onClick={() => setShowGasModal(true)}
+              className="px-2.5 py-1 rounded-lg bg-emerald-900/50 hover:bg-emerald-800/60 text-emerald-300 border border-emerald-700/60 text-[11px] font-bold flex items-center gap-1.5 transition cursor-pointer"
+            >
+              <i className="fa-solid fa-code text-[10px]"></i>
+              <span>Skrip Google Apps Script (Code.gs)</span>
+            </button>
+
+            {/* Download CSV Template */}
+            <button
+              type="button"
+              onClick={handleDownloadCsvTemplate}
+              className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-[11px] font-bold flex items-center gap-1.5 transition cursor-pointer"
+            >
+              <i className="fa-solid fa-file-csv text-amber-400 text-[10px]"></i>
+              <span>Template CSV User</span>
+            </button>
+          </div>
+
+          {/* Connection status indicator */}
+          <div className="flex items-center gap-2 text-[11px]">
+            <span className="text-slate-400">Status Cloud:</span>
+            {sbConfig.url && sbConfig.anonKey ? (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-mono text-[10.5px]">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                Supabase Terhubung
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-mono text-[10.5px]">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                Konfigurasi Lokal/Server
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Sync Status Banner */}
+        {cloudSyncStatus.message && (
+          <div className={`p-3 rounded-xl text-xs font-semibold flex items-center justify-between gap-3 animate-fadeIn ${
+            cloudSyncStatus.type === 'success'
+              ? 'bg-emerald-950/60 text-emerald-300 border border-emerald-800'
+              : cloudSyncStatus.type === 'error'
+              ? 'bg-rose-950/60 text-rose-300 border border-rose-800'
+              : 'bg-indigo-950/60 text-indigo-300 border border-indigo-800'
+          }`}>
+            <div className="flex items-center gap-2">
+              <i className={`fa-solid ${
+                cloudSyncStatus.type === 'success'
+                  ? 'fa-circle-check text-emerald-400'
+                  : cloudSyncStatus.type === 'error'
+                  ? 'fa-circle-exclamation text-rose-400'
+                  : 'fa-spinner animate-spin text-indigo-400'
+              }`}></i>
+              <span>{cloudSyncStatus.message}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setCloudSyncStatus({ type: 'idle', message: '' })}
+              className="text-slate-400 hover:text-white text-xs cursor-pointer"
+            >
+              &times;
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Filter and Search Bar */}
@@ -1474,6 +1779,269 @@ export const MasterUsersManagement: React.FC<MasterUsersManagementProps> = ({
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: SUPABASE SQL DDL SCHEMA */}
+      {/* ========================================================================= */}
+      {showSqlModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-2xl w-full border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="p-4 bg-slate-900 text-white flex items-center justify-between border-b border-slate-700 shrink-0">
+              <div className="flex items-center gap-2">
+                <i className="fa-solid fa-database text-indigo-400"></i>
+                <h3 className="font-bold text-sm text-white">Skema SQL Database Supabase (`system_users`)</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowSqlModal(false)}
+                className="text-slate-400 hover:text-white text-lg"
+              >
+                &times;
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 overflow-y-auto">
+              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                Salin dan jalankan skrip SQL di bawah ini pada <strong>Supabase SQL Editor</strong> di project Supabase Anda. Skrip ini akan membuat tabel <code className="text-indigo-600 dark:text-indigo-400 font-mono font-bold">system_users</code> dengan kolom lengkap beserta hak akses publik (RLS).
+              </p>
+
+              <div className="relative">
+                <pre className="p-4 rounded-xl bg-slate-950 text-slate-200 font-mono text-[11px] overflow-x-auto max-h-72 border border-slate-800 leading-relaxed selection:bg-indigo-500 selection:text-white">
+                  {generateSupabaseSqlForUsersTable()}
+                </pre>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(generateSupabaseSqlForUsersTable());
+                    toast('Script SQL Supabase disalin ke clipboard!');
+                  }}
+                  className="absolute top-2.5 right-2.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[10.5px] flex items-center gap-1.5 shadow-md cursor-pointer"
+                >
+                  <i className="fa-solid fa-copy"></i>
+                  <span>Salin SQL</span>
+                </button>
+              </div>
+
+              <div className="p-3 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/60 text-xs text-indigo-900 dark:text-indigo-300 space-y-1">
+                <p className="font-bold flex items-center gap-1.5">
+                  <i className="fa-solid fa-circle-info"></i> Petunjuk Penggunaan:
+                </p>
+                <ol className="list-decimal list-inside space-y-0.5 text-[11.5px] text-slate-600 dark:text-slate-300 pl-1">
+                  <li>Buka dashboard Supabase project Anda di browser.</li>
+                  <li>Pilih menu <strong>SQL Editor</strong> di sidebar kiri, lalu klik <strong>New query</strong>.</li>
+                  <li>Tempelkan (Paste) skrip SQL di atas lalu tekan tombol <strong>RUN</strong>.</li>
+                  <li>Setelah selesai, akun master akan tersinkronisasi secara otomatis antar browser &amp; perangkat!</li>
+                </ol>
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-50 dark:bg-slate-850 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-2.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => setShowSqlModal(false)}
+                className="px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                Tutup
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(generateSupabaseSqlForUsersTable());
+                  toast('Script SQL Supabase disalin ke clipboard!');
+                }}
+                className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+              >
+                <i className="fa-solid fa-copy"></i>
+                <span>Salin Script SQL</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: GOOGLE APPS SCRIPT (Code.gs) */}
+      {/* ========================================================================= */}
+      {showGasModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-2xl w-full border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="p-4 bg-slate-900 text-white flex items-center justify-between border-b border-slate-700 shrink-0">
+              <div className="flex items-center gap-2">
+                <i className="fa-solid fa-code text-emerald-400"></i>
+                <h3 className="font-bold text-sm text-white">Google Apps Script Automator (`Code.gs`)</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowGasModal(false)}
+                className="text-slate-400 hover:text-white text-lg"
+              >
+                &times;
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 overflow-y-auto">
+              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                Skrip ini berjalan langsung di Google Sheets untuk membuat tab <code className="text-emerald-600 dark:text-emerald-400 font-mono font-bold">USER_ACCOUNTS</code> secara otomatis, mengisikan header, memformat tabel, dan menyediakan REST Web App endpoint untuk aplikasi web ini.
+              </p>
+
+              <div className="relative">
+                <pre className="p-4 rounded-xl bg-slate-950 text-slate-200 font-mono text-[11px] overflow-x-auto max-h-72 border border-slate-800 leading-relaxed selection:bg-emerald-500 selection:text-white">
+                  {generateGoogleAppsScriptForUsersManagement()}
+                </pre>
+                <div className="absolute top-2.5 right-2.5 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(generateGoogleAppsScriptForUsersManagement());
+                      toast('Script Google Apps Script disalin ke clipboard!');
+                    }}
+                    className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-[10.5px] flex items-center gap-1 shadow-md cursor-pointer"
+                  >
+                    <i className="fa-solid fa-copy"></i>
+                    <span>Salin</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDownloadGasScript}
+                    className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10.5px] flex items-center gap-1 shadow-md cursor-pointer"
+                  >
+                    <i className="fa-solid fa-download"></i>
+                    <span>Unduh .js</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 text-xs text-emerald-900 dark:text-emerald-300 space-y-1">
+                <p className="font-bold flex items-center gap-1.5">
+                  <i className="fa-solid fa-circle-check"></i> 3 Langkah Mudah di Google Sheets:
+                </p>
+                <ol className="list-decimal list-inside space-y-1 text-[11.5px] text-slate-600 dark:text-slate-300 pl-1">
+                  <li>Buka spreadsheet Google Sheets Anda &rarr; Klik menu <strong>Extensions (Ekstensi)</strong> &rarr; <strong>Apps Script</strong>.</li>
+                  <li>Hapus kode bawaan, tempelkan skrip di atas ke file <code>Code.gs</code>, lalu klik tombol <strong>Save</strong>.</li>
+                  <li>Pilih fungsi <code>setupUserAccountsSheet</code> pada dropdown menu lalu klik <strong>Run</strong> untuk membuat sheet <code>USER_ACCOUNTS</code> secara instan!</li>
+                </ol>
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-50 dark:bg-slate-850 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-2.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => setShowGasModal(false)}
+                className="px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                Tutup
+              </button>
+              <button
+                type="button"
+                onClick={handleDownloadGasScript}
+                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+              >
+                <i className="fa-solid fa-download"></i>
+                <span>Unduh File Skrip (.js)</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: KONFIGURASI SUPABASE & GOOGLE SHEETS */}
+      {/* ========================================================================= */}
+      {showCloudConfigModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-lg w-full border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden">
+            <div className="p-4 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white flex items-center justify-between border-b border-slate-700">
+              <div className="flex items-center gap-2">
+                <i className="fa-solid fa-sliders text-indigo-400"></i>
+                <h3 className="font-bold text-sm text-white">Pengaturan Sinkronisasi Supabase &amp; Sheets</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCloudConfigModal(false)}
+                className="text-slate-400 hover:text-white text-lg"
+              >
+                &times;
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveCloudConfig} className="p-5 space-y-4">
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Supabase Project URL
+                  </label>
+                  <input
+                    type="url"
+                    value={sbConfig.url}
+                    onChange={(e) => setSbConfig({ ...sbConfig, url: e.target.value })}
+                    placeholder="https://xxxxxxxxxxxx.supabase.co"
+                    className="w-full px-3.5 py-2 rounded-xl text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-mono text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
+                  />
+                  <p className="text-[10.5px] text-slate-400 mt-1">Ditemukan di Supabase Dashboard &rarr; Project Settings &rarr; API &rarr; Project URL</p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Supabase Anon Public API Key
+                  </label>
+                  <input
+                    type="password"
+                    value={sbConfig.anonKey}
+                    onChange={(e) => setSbConfig({ ...sbConfig, anonKey: e.target.value })}
+                    placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                    className="w-full px-3.5 py-2 rounded-xl text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-mono text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
+                  />
+                  <p className="text-[10.5px] text-slate-400 mt-1">Anon key aman digunakan di sisi client untuk sinkronisasi database.</p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Nama Tabel Supabase Users
+                  </label>
+                  <input
+                    type="text"
+                    value={sbConfig.tableName || 'system_users'}
+                    onChange={(e) => setSbConfig({ ...sbConfig, tableName: e.target.value })}
+                    placeholder="system_users"
+                    className="w-full px-3.5 py-2 rounded-xl text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-mono text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+
+                <div className="pt-2 border-t border-slate-200 dark:border-slate-800">
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Link Spreadsheet Google Sheets
+                  </label>
+                  <input
+                    type="url"
+                    value={gsUrl}
+                    onChange={(e) => setGsUrl(e.target.value)}
+                    placeholder="https://docs.google.com/spreadsheets/d/.../edit"
+                    className="w-full px-3.5 py-2 rounded-xl text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-mono text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500"
+                  />
+                  <p className="text-[10.5px] text-slate-400 mt-1">Digunakan untuk mengambil data akun dari tab <code>USER_ACCOUNTS</code>.</p>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-200 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowCloudConfigModal(false)}
+                  className="px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-md cursor-pointer"
+                >
+                  <i className="fa-solid fa-floppy-disk"></i>
+                  <span>Simpan Konfigurasi</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

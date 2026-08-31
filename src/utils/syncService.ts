@@ -1,4 +1,4 @@
-import { Employee, SkillMeta } from '../types';
+import { Employee, SkillMeta, UserAccount, UserScopeType } from '../types';
 import { INITIAL_SKILL_META, calculateEmployeeScore, BULAN_LABELS } from '../data/initialData';
 import { saveStoredEmployees } from './storage';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
@@ -23,6 +23,7 @@ export interface SyncResponse<T = any> {
   success: boolean;
   message: string;
   data?: T;
+  users?: UserAccount[];
   count?: number;
   preview?: ImportPreview;
   errors?: string[];
@@ -1352,33 +1353,141 @@ CREATE TABLE IF NOT EXISTS public.users_accounts (
     name VARCHAR(150) NOT NULL,
     role VARCHAR(100) NOT NULL DEFAULT 'HR Development Admin',
     department VARCHAR(150) DEFAULT 'Human Resources Development',
+    divisi VARCHAR(150) DEFAULT 'Human Resources & Corporate Service',
+    scope_type VARCHAR(50) DEFAULT 'ALL',
+    scope_value VARCHAR(150) DEFAULT 'Semua Departemen',
+    status VARCHAR(20) DEFAULT 'ACTIVE',
     email VARCHAR(150) DEFAULT 'mahmudnurdiansyah4@gmail.com',
     phone VARCHAR(50) DEFAULT '0819-1932-7912',
     nik VARCHAR(50) DEFAULT '122108091',
     avatar_url TEXT DEFAULT '',
     bio TEXT DEFAULT 'Administrator Multi-Skill Monitoring & Pengembangan Kompetensi Karyawan PT Ajinomoto Indonesia Mojokerto Factory.',
+    signature_image TEXT DEFAULT '',
+    can_edit_competency BOOLEAN DEFAULT true,
+    can_manage_users BOOLEAN DEFAULT false,
+    last_login TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Seed Akun Default Super Admin HR Development
-INSERT INTO public.users_accounts (username, password, name, role, department, email, phone, nik, bio)
-VALUES (
+-- Seed Akun Default Super Admin & PIC Departemen
+INSERT INTO public.users_accounts (username, password, name, role, department, divisi, scope_type, scope_value, status, email, phone, nik, bio, can_edit_competency, can_manage_users)
+VALUES 
+(
     'hr_admin',
     'password123',
     'Mahmud Nurdiansyah',
     'HR Development Admin',
     'Human Resources Development',
+    'Human Resources & Corporate Service',
+    'ALL',
+    'Semua Departemen',
+    'ACTIVE',
     'mahmudnurdiansyah4@gmail.com',
     '0819-1932-7912',
     '122108091',
-    'Administrator Multi-Skill Monitoring & Pengembangan Kompetensi Karyawan PT Ajinomoto Indonesia Mojokerto Factory.'
+    'Super Administrator Multi-Skill Monitoring & Pengembangan Kompetensi Karyawan PT Ajinomoto Indonesia Mojokerto Factory.',
+    true,
+    true
+),
+(
+    'fermentasi_pic',
+    'fermentasi123',
+    'Budi Santoso, S.T.',
+    'PIC Departemen Fermentasi',
+    'Fermentation Department',
+    'Production FI (MSG)',
+    'DEPARTMENT',
+    'Fermentation Department',
+    'ACTIVE',
+    'budi.santoso@ajinomoto.co.id',
+    '0812-3456-7890',
+    '121904102',
+    'Person-in-Charge Pemantauan & Evaluasi Matriks Multi-Skill Bagian Proses Fermentasi MSG.',
+    true,
+    false
+),
+(
+    'packaging_pic',
+    'packaging123',
+    'Siti Rahmawati',
+    'PIC Packaging & Filling',
+    'Packaging Department',
+    'Production FP (Food Products)',
+    'DEPARTMENT',
+    'Packaging Department',
+    'ACTIVE',
+    'siti.rahmawati@ajinomoto.co.id',
+    '0813-9876-5432',
+    '122005214',
+    'Supervisor & PIC Multi-Skill Pemantauan Keahlian Packaging & Filling Food Products Mojokerto Factory.',
+    true,
+    false
+),
+(
+    'qa_pic',
+    'qa123456',
+    'Agus Setiawan, S.Si.',
+    'Quality Assurance PIC',
+    'Quality Assurance',
+    'Technical & QA',
+    'DEPARTMENT',
+    'Quality Assurance',
+    'ACTIVE',
+    'agus.setiawan@ajinomoto.co.id',
+    '0815-6789-0123',
+    '121803119',
+    'Penanggung Jawab Kompetensi Analis & Matriks Laboratorium Quality Assurance & Control.',
+    true,
+    false
+),
+(
+    'eng_supervisor',
+    'eng12345',
+    'Hendra Wijaya',
+    'Section Supervisor Maintenance',
+    'Engineering & Maintenance',
+    'Engineering & Utility',
+    'DEPARTMENT',
+    'Engineering & Maintenance',
+    'ACTIVE',
+    'hendra.wijaya@ajinomoto.co.id',
+    '0821-4567-8901',
+    '121702088',
+    'Supervisor Divisi Pemeliharaan Mesin & Utilitas Pabrik Ajinomoto Mojokerto.',
+    true,
+    false
+),
+(
+    'mgmt_viewer',
+    'viewer123',
+    'Ir. Haryono',
+    'Executive Management Auditor',
+    'Factory Executive Office',
+    'Factory Management',
+    'ALL',
+    'Semua Departemen',
+    'ACTIVE',
+    'haryono.exec@ajinomoto.co.id',
+    '0811-2233-4455',
+    '119801001',
+    'Pemantau Eksekutif KPI Matriks Multi-Skill dan Kesiapan Kompetensi Tenaga Kerja Pabrik.',
+    false,
+    false
 )
 ON CONFLICT (username) DO UPDATE SET
     name = EXCLUDED.name,
     nik = EXCLUDED.nik,
+    role = EXCLUDED.role,
+    department = EXCLUDED.department,
+    divisi = EXCLUDED.divisi,
+    scope_type = EXCLUDED.scope_type,
+    scope_value = EXCLUDED.scope_value,
+    status = EXCLUDED.status,
     phone = EXCLUDED.phone,
     email = EXCLUDED.email,
+    can_edit_competency = EXCLUDED.can_edit_competency,
+    can_manage_users = EXCLUDED.can_manage_users,
     updated_at = NOW();
 
 -- 3. TABEL KONFIGURASI SISTEM, SMTP EMAIL & APPROVAL E-SIGN
@@ -1603,39 +1712,1009 @@ function doGet(e) {
 
 
 // -------------------------------------------------------------
-// Download Sample CSV Template
+// Supabase User Accounts Management & Synchronization
 // -------------------------------------------------------------
-export function downloadSampleImportCsv(): void {
-  const sampleHeaders = [
-    'No', 'Emp ID', 'Emp Name', 'Divisi', 'Department', 'Section', 'Grade', 'Job Grade',
-    'Jabatan', 'Gender', 'Tanggal Pensiun', 'PIC', 'Tahun', 'Bulan'
-  ].concat(INITIAL_SKILL_META.slice(0, 15).map((s) => s.code));
+export const SUPABASE_USERS_TABLE = 'users_accounts';
 
-  const sampleRow1 = [
-    '1', 'AJN-MJK-0101', 'Ahmad Fadhil Kurniawan', 'Produksi MSG & Seasoning', 'Fermentation Department',
-    'Inoculum & Media Section', 'M4', 'JG-11', 'Department Manager Fermentation', 'L', '14 Nov 2038', 'Rudi Hartono', '2026', '8',
-    '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '0', '0', '0', '0'
+/**
+ * Test or check if users_accounts table exists in Supabase
+ */
+export async function testSupabaseUsersTable(config: SupabaseConfig): Promise<{ success: boolean; message: string; count?: number }> {
+  if (!config.url || !config.anonKey) {
+    return { success: false, message: 'Supabase URL dan Anon Key belum dikonfigurasi.' };
+  }
+
+  const client = getSupabaseClient(config);
+  try {
+    if (client) {
+      const { count, error } = await client
+        .from(SUPABASE_USERS_TABLE)
+        .select('*', { count: 'exact', head: true });
+
+      if (error) {
+        if (error.code === 'PGRST205' || error.message?.includes('does not exist')) {
+          return {
+            success: false,
+            message: `Tabel "${SUPABASE_USERS_TABLE}" belum dibuat di Supabase. Jalankan script SQL DDL di SQL Editor Supabase.`
+          };
+        }
+        return { success: false, message: `Error Supabase Users: ${error.message}` };
+      }
+
+      return {
+        success: true,
+        message: `Tabel "${SUPABASE_USERS_TABLE}" aktif di Supabase!`,
+        count: count ?? 0
+      };
+    }
+
+    return { success: false, message: 'Gagal menginisialisasi klien Supabase.' };
+  } catch (err: any) {
+    return { success: false, message: err?.message || 'Gagal terhubung ke Supabase.' };
+  }
+}
+
+/**
+ * Fetch all user accounts directly from Supabase users_accounts table
+ */
+export async function fetchSupabaseUsers(config: SupabaseConfig): Promise<{ success: boolean; message: string; users: UserAccount[] }> {
+  if (!config.url || !config.anonKey) {
+    return { success: false, message: 'Supabase belum dikonfigurasi.', users: [] };
+  }
+
+  try {
+    const client = getSupabaseClient(config);
+    if (!client) {
+      return { success: false, message: 'Klien Supabase tidak tersedia.', users: [] };
+    }
+
+    const { data, error } = await client
+      .from(SUPABASE_USERS_TABLE)
+      .select('*')
+      .order('id', { ascending: true });
+
+    if (error) {
+      return {
+        success: false,
+        message: `Gagal mengambil akun pengguna dari Supabase: ${error.message}`,
+        users: []
+      };
+    }
+
+    if (!Array.isArray(data) || data.length === 0) {
+      return {
+        success: true,
+        message: 'Tabel users_accounts di Supabase masih kosong.',
+        users: []
+      };
+    }
+
+    const parsedUsers: UserAccount[] = data.map((r: any) => ({
+      username: (r.username || '').toString().trim(),
+      password: r.password ? (r.password || '').toString() : 'password123',
+      name: (r.name || r.username || '').toString().trim(),
+      role: (r.role || 'PIC').toString().trim(),
+      department: (r.department || '').toString().trim(),
+      divisi: (r.divisi || '').toString().trim(),
+      scopeType: (r.scope_type || r.scopeType || 'ALL') as UserScopeType,
+      scopeValue: (r.scope_value || r.scopeValue || '').toString().trim(),
+      status: (r.status || 'ACTIVE') as 'ACTIVE' | 'INACTIVE',
+      email: (r.email || '').toString().trim(),
+      phone: (r.phone || '').toString().trim(),
+      nik: (r.nik || '').toString().trim(),
+      avatarUrl: (r.avatar_url || r.avatarUrl || '').toString().trim(),
+      bio: (r.bio || '').toString().trim(),
+      signatureImage: (r.signature_image || r.signatureImage || '').toString().trim(),
+      canEditCompetency: r.can_edit_competency !== undefined ? Boolean(r.can_edit_competency) : true,
+      canManageUsers: r.can_manage_users !== undefined ? Boolean(r.can_manage_users) : (r.username === 'hr_admin'),
+      createdAt: r.created_at || new Date().toISOString(),
+      updatedAt: r.updated_at || new Date().toISOString(),
+      lastLogin: r.last_login || null
+    }));
+
+    return {
+      success: true,
+      message: `Berhasil memuat ${parsedUsers.length} akun pengguna dari Supabase.`,
+      users: parsedUsers
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: `Gagal mengambil data user Supabase: ${err.message || 'Kesalahan jaringan'}`,
+      users: []
+    };
+  }
+}
+
+/**
+ * Push / Upsert a single User Account into Supabase
+ */
+export async function pushUserToSupabase(
+  config: SupabaseConfig,
+  user: UserAccount
+): Promise<{ success: boolean; message: string; user?: UserAccount }> {
+  if (!config.url || !config.anonKey) {
+    return { success: false, message: 'Supabase belum dikonfigurasi.' };
+  }
+
+  const client = getSupabaseClient(config);
+  if (!client) {
+    return { success: false, message: 'Klien Supabase tidak tersedia.' };
+  }
+
+  try {
+    const payload = {
+      username: user.username.trim().toLowerCase(),
+      password: user.password || 'password123',
+      name: user.name,
+      role: user.role,
+      department: user.department,
+      divisi: user.divisi || 'Human Resources & Corporate Service',
+      scope_type: user.scopeType || 'ALL',
+      scope_value: user.scopeValue || user.department,
+      status: user.status || 'ACTIVE',
+      email: user.email || '',
+      phone: user.phone || '',
+      nik: user.nik || '',
+      avatar_url: user.avatarUrl || '',
+      bio: user.bio || '',
+      signature_image: user.signatureImage || '',
+      can_edit_competency: user.canEditCompetency !== undefined ? user.canEditCompetency : true,
+      can_manage_users: user.canManageUsers !== undefined ? user.canManageUsers : (user.username.toLowerCase() === 'hr_admin'),
+      last_login: user.lastLogin || null,
+      updated_at: new Date().toISOString()
+    };
+
+    const { error } = await client
+      .from(SUPABASE_USERS_TABLE)
+      .upsert(payload, { onConflict: 'username' });
+
+    if (error) {
+      return { success: false, message: `Gagal menyimpan user ke Supabase: ${error.message}` };
+    }
+
+    return {
+      success: true,
+      message: `Akun "${user.name}" (@${user.username}) berhasil disimpan ke Supabase.`,
+      user
+    };
+  } catch (err: any) {
+    return { success: false, message: `Gagal menyimpan user ke Supabase: ${err.message || 'Error jaringan'}` };
+  }
+}
+
+/**
+ * Batch Push / Sync all user accounts to Supabase
+ */
+export async function pushAllUsersToSupabase(
+  config: SupabaseConfig,
+  users: UserAccount[]
+): Promise<{ success: boolean; message: string; count?: number }> {
+  if (!config.url || !config.anonKey) {
+    return { success: false, message: 'Supabase belum dikonfigurasi.' };
+  }
+
+  const client = getSupabaseClient(config);
+  if (!client) {
+    return { success: false, message: 'Klien Supabase tidak tersedia.' };
+  }
+
+  try {
+    const payload = users.map((u) => ({
+      username: u.username.trim().toLowerCase(),
+      password: u.password || 'password123',
+      name: u.name,
+      role: u.role,
+      department: u.department,
+      divisi: u.divisi || 'Human Resources & Corporate Service',
+      scope_type: u.scopeType || 'ALL',
+      scope_value: u.scopeValue || u.department,
+      status: u.status || 'ACTIVE',
+      email: u.email || '',
+      phone: u.phone || '',
+      nik: u.nik || '',
+      avatar_url: u.avatarUrl || '',
+      bio: u.bio || '',
+      signature_image: u.signatureImage || '',
+      can_edit_competency: u.canEditCompetency !== undefined ? u.canEditCompetency : true,
+      can_manage_users: u.canManageUsers !== undefined ? u.canManageUsers : (u.username.toLowerCase() === 'hr_admin'),
+      last_login: u.lastLogin || null,
+      updated_at: new Date().toISOString()
+    }));
+
+    const { error } = await client
+      .from(SUPABASE_USERS_TABLE)
+      .upsert(payload, { onConflict: 'username' });
+
+    if (error) {
+      return { success: false, message: `Gagal sinkronisasi batch user ke Supabase: ${error.message}` };
+    }
+
+    return {
+      success: true,
+      message: `Berhasil mensinkronkan ${users.length} akun pengguna ke Supabase table "${SUPABASE_USERS_TABLE}".`,
+      count: users.length
+    };
+  } catch (err: any) {
+    return { success: false, message: `Gagal sinkronisasi user ke Supabase: ${err.message}` };
+  }
+}
+
+/**
+ * Delete a user account from Supabase
+ */
+export async function deleteUserFromSupabase(
+  config: SupabaseConfig,
+  username: string
+): Promise<{ success: boolean; message: string }> {
+  if (!config.url || !config.anonKey) {
+    return { success: false, message: 'Supabase belum dikonfigurasi.' };
+  }
+
+  if (username.toLowerCase() === 'hr_admin') {
+    return { success: false, message: 'Akun Super Administrator Utama (hr_admin) dilindungi.' };
+  }
+
+  const client = getSupabaseClient(config);
+  if (!client) {
+    return { success: false, message: 'Klien Supabase tidak tersedia.' };
+  }
+
+  try {
+    const { error } = await client
+      .from(SUPABASE_USERS_TABLE)
+      .delete()
+      .eq('username', username.trim().toLowerCase());
+
+    if (error) {
+      return { success: false, message: `Gagal menghapus user di Supabase: ${error.message}` };
+    }
+
+    return { success: true, message: `Akun @${username} berhasil dihapus dari Supabase.` };
+  } catch (err: any) {
+    return { success: false, message: `Gagal menghapus user di Supabase: ${err.message}` };
+  }
+}
+
+/**
+ * Direct Login / Authenticate against Supabase users_accounts
+ */
+export async function authenticateUserSupabase(
+  config: SupabaseConfig,
+  username: string,
+  password: string
+): Promise<{ success: boolean; message?: string; user?: UserAccount }> {
+  if (!config.url || !config.anonKey) {
+    return { success: false, message: 'Supabase belum dikonfigurasi.' };
+  }
+
+  const client = getSupabaseClient(config);
+  if (!client) {
+    return { success: false, message: 'Klien Supabase tidak tersedia.' };
+  }
+
+  try {
+    const clean = username.trim().toLowerCase();
+    const { data, error } = await client
+      .from(SUPABASE_USERS_TABLE)
+      .select('*')
+      .or(`username.ilike.${clean},email.ilike.${clean},nik.eq.${clean}`)
+      .limit(1);
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
+
+    if (!data || data.length === 0) {
+      return { success: false, message: 'Akun tidak ditemukan di database Supabase.' };
+    }
+
+    const record = data[0];
+    if (record.password !== password) {
+      return { success: false, message: 'Kata sandi salah. Silakan coba lagi.' };
+    }
+
+    if (record.status === 'INACTIVE') {
+      return { success: false, message: 'Akun ini dinonaktifkan oleh administrator.' };
+    }
+
+    // Update last login in background
+    client
+      .from(SUPABASE_USERS_TABLE)
+      .update({ last_login: new Date().toISOString() })
+      .eq('username', record.username)
+      .then(() => {});
+
+    const user: UserAccount = {
+      username: record.username,
+      password: record.password,
+      name: record.name,
+      role: record.role,
+      department: record.department,
+      divisi: record.divisi || '',
+      scopeType: (record.scope_type || 'ALL') as UserScopeType,
+      scopeValue: record.scope_value || '',
+      status: (record.status || 'ACTIVE') as 'ACTIVE' | 'INACTIVE',
+      email: record.email || '',
+      phone: record.phone || '',
+      nik: record.nik || '',
+      avatarUrl: record.avatar_url || '',
+      bio: record.bio || '',
+      signatureImage: record.signature_image || '',
+      canEditCompetency: record.can_edit_competency !== undefined ? Boolean(record.can_edit_competency) : true,
+      canManageUsers: record.can_manage_users !== undefined ? Boolean(record.can_manage_users) : (record.username === 'hr_admin'),
+      lastLogin: new Date().toISOString(),
+      createdAt: record.created_at || new Date().toISOString(),
+      updatedAt: record.updated_at || new Date().toISOString()
+    };
+
+    return { success: true, message: 'Login Supabase berhasil.', user };
+  } catch (err: any) {
+    return { success: false, message: err?.message || 'Gagal otentikasi ke Supabase.' };
+  }
+}
+
+// -------------------------------------------------------------
+// Google Sheets User Accounts Import & Parser
+// -------------------------------------------------------------
+export function parseRowsToUsers(rawRows: string[][]): { users: UserAccount[]; errors: string[] } {
+  const errors: string[] = [];
+  if (!rawRows || rawRows.length === 0) {
+    return { users: [], errors: ['File / Sheet kosong.'] };
+  }
+
+  // Find header row containing username / name / role
+  let headerIdx = -1;
+  for (let i = 0; i < Math.min(rawRows.length, 10); i++) {
+    const rowStr = rawRows[i].map((c) => normalizeHeaderName(c)).join(' ');
+    if (rowStr.includes('username') || rowStr.includes('nama') || rowStr.includes('role') || rowStr.includes('departemen')) {
+      headerIdx = i;
+      break;
+    }
+  }
+
+  if (headerIdx === -1) headerIdx = 0;
+
+  const headerRow = rawRows[headerIdx];
+  const colMap: Record<string, number> = {};
+
+  headerRow.forEach((col, idx) => {
+    const norm = normalizeHeaderName(col);
+    if (['username', 'user', 'iduser', 'userid', 'akun'].includes(norm)) colMap['username'] = idx;
+    else if (['password', 'katasandi', 'pass', 'pwd'].includes(norm)) colMap['password'] = idx;
+    else if (['name', 'nama', 'namalengkap', 'fullname', 'pengguna'].includes(norm)) colMap['name'] = idx;
+    else if (['role', 'jabatan', 'peran', 'akses', 'hakakses'].includes(norm)) colMap['role'] = idx;
+    else if (['department', 'departemen', 'dept'].includes(norm)) colMap['department'] = idx;
+    else if (['divisi', 'division', 'div'].includes(norm)) colMap['divisi'] = idx;
+    else if (['scopetype', 'tipeakses', 'scope', 'cakupan'].includes(norm)) colMap['scopeType'] = idx;
+    else if (['scopevalue', 'nilaiakses', 'targetakses', 'departemenakses'].includes(norm)) colMap['scopeValue'] = idx;
+    else if (['status', 'statusakun', 'state'].includes(norm)) colMap['status'] = idx;
+    else if (['email', 'surel', 'mail'].includes(norm)) colMap['email'] = idx;
+    else if (['phone', 'telepon', 'nohp', 'hp', 'telp', 'wa'].includes(norm)) colMap['phone'] = idx;
+    else if (['nik', 'nip', 'nopegawai'].includes(norm)) colMap['nik'] = idx;
+    else if (['bio', 'biografi', 'keterangan', 'deskripsi'].includes(norm)) colMap['bio'] = idx;
+    else if (['caneditcompetency', 'editkompetensi', 'bolehisi'].includes(norm)) colMap['canEditCompetency'] = idx;
+    else if (['canmanageusers', 'kelolauser', 'admin'].includes(norm)) colMap['canManageUsers'] = idx;
+  });
+
+  if (colMap['username'] === undefined && colMap['name'] === undefined) {
+    return { users: [], errors: ['Kolom Username atau Nama tidak terdeteksi pada baris header.'] };
+  }
+
+  const dataRows = rawRows.slice(headerIdx + 1);
+  const parsedUsers: UserAccount[] = [];
+
+  dataRows.forEach((row, idx) => {
+    if (!row || row.every((c) => !c || c.trim() === '')) return;
+
+    let rawUsername = (colMap['username'] !== undefined ? row[colMap['username']] : '')?.trim();
+    const rawName = (colMap['name'] !== undefined ? row[colMap['name']] : '')?.trim();
+
+    if (!rawUsername && rawName) {
+      rawUsername = rawName.toLowerCase().replace(/[^a-z0-9]/g, '_').slice(0, 15);
+    }
+
+    if (!rawUsername && !rawName) return;
+
+    const username = (rawUsername || `user_${idx + 1}`).toLowerCase();
+    const name = rawName || username;
+    const password = (colMap['password'] !== undefined ? row[colMap['password']] : '')?.trim() || 'password123';
+    const role = (colMap['role'] !== undefined ? row[colMap['role']] : '')?.trim() || 'PIC Departemen';
+    const department = (colMap['department'] !== undefined ? row[colMap['department']] : '')?.trim() || 'Fermentation Department';
+    const divisi = (colMap['divisi'] !== undefined ? row[colMap['divisi']] : '')?.trim() || 'Production FI (MSG)';
+
+    let rawScope = (colMap['scopeType'] !== undefined ? row[colMap['scopeType']] : 'DEPARTMENT')?.trim().toUpperCase();
+    let scopeType: UserScopeType = 'DEPARTMENT';
+    if (rawScope === 'ALL' || rawScope.includes('SEMUA')) scopeType = 'ALL';
+    else if (rawScope === 'DIVISI') scopeType = 'DIVISI';
+    else if (rawScope === 'PIC') scopeType = 'PIC';
+
+    const scopeValue = (colMap['scopeValue'] !== undefined ? row[colMap['scopeValue']] : '')?.trim() || (scopeType === 'ALL' ? 'Semua Departemen' : department);
+
+    let rawStatus = (colMap['status'] !== undefined ? row[colMap['status']] : 'ACTIVE')?.trim().toUpperCase();
+    let status: 'ACTIVE' | 'INACTIVE' = rawStatus === 'INACTIVE' || rawStatus === 'NONAKTIF' || rawStatus === '0' ? 'INACTIVE' : 'ACTIVE';
+
+    const email = (colMap['email'] !== undefined ? row[colMap['email']] : '')?.trim();
+    const phone = (colMap['phone'] !== undefined ? row[colMap['phone']] : '')?.trim();
+    const nik = (colMap['nik'] !== undefined ? row[colMap['nik']] : '')?.trim();
+    const bio = (colMap['bio'] !== undefined ? row[colMap['bio']] : '')?.trim();
+
+    const rawCanEdit = colMap['canEditCompetency'] !== undefined ? row[colMap['canEditCompetency']]?.trim().toLowerCase() : 'true';
+    const canEditCompetency = rawCanEdit === 'true' || rawCanEdit === '1' || rawCanEdit === 'ya' || rawCanEdit === 'yes';
+
+    const rawCanManage = colMap['canManageUsers'] !== undefined ? row[colMap['canManageUsers']]?.trim().toLowerCase() : (username === 'hr_admin' ? 'true' : 'false');
+    const canManageUsers = rawCanManage === 'true' || rawCanManage === '1' || rawCanManage === 'ya' || rawCanManage === 'yes' || username === 'hr_admin';
+
+    parsedUsers.push({
+      username,
+      password,
+      name,
+      role,
+      department,
+      divisi,
+      scopeType,
+      scopeValue,
+      status,
+      email,
+      phone,
+      nik,
+      bio,
+      canEditCompetency,
+      canManageUsers,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+  });
+
+  return { users: parsedUsers, errors };
+}
+
+/**
+ * Fetch and Parse User Accounts from Google Sheet
+ */
+export async function fetchGoogleSheetUsers(sheetUrl: string): Promise<SyncResponse<UserAccount[]>> {
+  if (!sheetUrl || !sheetUrl.trim()) {
+    return { success: false, message: 'URL Google Sheet belum diisi.' };
+  }
+
+  let csvText = '';
+  const gvizUrl = buildGoogleSheetCsvUrl(sheetUrl, 'gviz');
+  try {
+    const res1 = await fetch(gvizUrl);
+    if (res1.ok) {
+      const text = await res1.text();
+      if (text && !text.includes('<!DOCTYPE html>') && !text.includes('<html') && !text.includes('Sign in to your Google Account')) {
+        csvText = text;
+      }
+    }
+  } catch (_) {}
+
+  if (!csvText) {
+    const exportUrl = buildGoogleSheetCsvUrl(sheetUrl, 'export');
+    try {
+      const res2 = await fetch(exportUrl);
+      if (res2.ok) {
+        const text = await res2.text();
+        if (text && !text.includes('<!DOCTYPE html>') && !text.includes('<html') && !text.includes('Sign in to your Google Account')) {
+          csvText = text;
+        }
+      }
+    } catch (_) {}
+  }
+
+  if (!csvText) {
+    return {
+      success: false,
+      message: 'Tidak dapat mengunduh data Sheet. Pastikan link Google Sheet dibuka untuk publik ("Siapa saja yang memiliki link dapat melihat").'
+    };
+  }
+
+  const rawRows = parseCsvString(csvText);
+  const { users, errors } = parseRowsToUsers(rawRows);
+
+  if (!users.length) {
+    return {
+      success: false,
+      message: 'Tidak ditemukan baris akun pengguna yang valid pada spreadsheet tersebut.',
+      errors
+    };
+  }
+
+  return {
+    success: true,
+    message: `Berhasil menarik ${users.length} akun pengguna dari Google Sheet.`,
+    data: users,
+    users: users,
+    count: users.length
+  };
+}
+
+/**
+ * Sync Google Sheets Users directly to Supabase
+ */
+export async function syncGoogleSheetsUsersDirectToSupabase(
+  sheetUrl: string,
+  config: SupabaseConfig
+): Promise<SyncResponse<UserAccount[]>> {
+  const sheetRes = await fetchGoogleSheetUsers(sheetUrl);
+  if (!sheetRes.success || !sheetRes.data || sheetRes.data.length === 0) {
+    return {
+      success: false,
+      message: `Gagal membaca akun dari Google Sheets: ${sheetRes.message}`
+    };
+  }
+
+  const fetchedUsers = sheetRes.data;
+  const pushRes = await pushAllUsersToSupabase(config, fetchedUsers);
+  if (!pushRes.success) {
+    return {
+      success: false,
+      message: `Akun berhasil dibaca dari Google Sheets (${fetchedUsers.length} akun), namun gagal diunggah ke Supabase: ${pushRes.message}`
+    };
+  }
+
+  return {
+    success: true,
+    message: `Sukses sinkronisasi! ${fetchedUsers.length} akun pengguna dari Google Sheets berhasil disimpan ke Supabase table "${SUPABASE_USERS_TABLE}".`,
+    data: fetchedUsers,
+    count: fetchedUsers.length
+  };
+}
+
+/**
+ * Generator for Google Apps Script to create dedicated USER_ACCOUNTS sheet tab in Google Sheets
+ */
+export function generateGoogleAppsScriptForUsersManagement(): string {
+  return `/**
+ * =========================================================================
+ * PT AJINOMOTO INDONESIA - MOJOKERTO FACTORY
+ * GOOGLE APPS SCRIPT: USER ACCOUNTS & MANAGEMENT SHEET CREATOR & SYNC
+ * =========================================================================
+ * 
+ * CARA PEMASANGAN:
+ * 1. Buka Google Spreadsheet Anda.
+ * 2. Klik menu 'Extensions' (Ekstensi) -> 'Apps Script'.
+ * 3. Salin & tempel kode di bawah ini.
+ * 4. Simpan (Ctrl+S) lalu jalankan fungsi 'createUsersManagementSheetTemplate()'.
+ * 5. Sheet baru bernama 'USER_ACCOUNTS' akan otomatis dibuat dan siap digunakan!
+ */
+
+/**
+ * 1. Fungsi Membuat Tab Sheet Baru Khusus Manajemen Akun Pengguna Ajinomoto
+ */
+function createUsersManagementSheetTemplate() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetName = "USER_ACCOUNTS";
+  var sheet = ss.getSheetByName(sheetName);
+  
+  if (!sheet) {
+    sheet = ss.insertSheet(sheetName);
+  } else {
+    sheet.clear();
+  }
+  
+  var headers = [
+    "No",
+    "Username",
+    "Password",
+    "Nama Lengkap",
+    "Role / Hak Akses",
+    "Departemen",
+    "Divisi",
+    "Scope Type",
+    "Scope Value",
+    "Status",
+    "Email",
+    "No Telepon",
+    "NIK",
+    "Bio",
+    "Can Edit Competency",
+    "Can Manage Users",
+    "Last Login",
+    "Updated At"
+  ];
+  
+  // Tulis Header
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  
+  // Format Header dengan Gaya Ajinomoto Burgundy Red
+  var headerRange = sheet.getRange(1, 1, 1, headers.length);
+  headerRange.setBackground("#B91C1C"); // Ajinomoto Red
+  headerRange.setFontColor("#FFFFFF");
+  headerRange.setFontWeight("bold");
+  headerRange.setHorizontalAlignment("center");
+  headerRange.setVerticalAlignment("middle");
+  sheet.setRowHeight(1, 38);
+  
+  // Freeze baris header dan kolom username
+  sheet.setFrozenRows(1);
+  sheet.setFrozenColumns(2);
+  
+  // Baris Data Contoh Akun Master
+  var sampleUsers = [
+    [
+      1,
+      "hr_admin",
+      "password123",
+      "Mahmud Nurdiansyah",
+      "HR Development Admin",
+      "Human Resources Development",
+      "Human Resources & Corporate Service",
+      "ALL",
+      "Semua Departemen",
+      "ACTIVE",
+      "mahmudnurdiansyah4@gmail.com",
+      "0819-1932-7912",
+      "122108091",
+      "Super Administrator Multi-Skill Monitoring & Pengembangan Kompetensi Karyawan PT Ajinomoto Indonesia Mojokerto Factory.",
+      "TRUE",
+      "TRUE",
+      "",
+      new Date().toISOString()
+    ],
+    [
+      2,
+      "fermentasi_pic",
+      "fermentasi123",
+      "Budi Santoso, S.T.",
+      "PIC Departemen Fermentasi",
+      "Fermentation Department",
+      "Production FI (MSG)",
+      "DEPARTMENT",
+      "Fermentation Department",
+      "ACTIVE",
+      "budi.santoso@ajinomoto.co.id",
+      "0812-3456-7890",
+      "121904102",
+      "Person-in-Charge Pemantauan & Evaluasi Matriks Multi-Skill Bagian Proses Fermentasi MSG.",
+      "TRUE",
+      "FALSE",
+      "",
+      new Date().toISOString()
+    ],
+    [
+      3,
+      "packaging_pic",
+      "packaging123",
+      "Siti Rahmawati",
+      "PIC Packaging & Filling",
+      "Packaging Department",
+      "Production FP (Food Products)",
+      "DEPARTMENT",
+      "Packaging Department",
+      "ACTIVE",
+      "siti.rahmawati@ajinomoto.co.id",
+      "0813-9876-5432",
+      "122005214",
+      "Supervisor & PIC Multi-Skill Pemantauan Keahlian Packaging & Filling Food Products Mojokerto Factory.",
+      "TRUE",
+      "FALSE",
+      "",
+      new Date().toISOString()
+    ],
+    [
+      4,
+      "qa_pic",
+      "qa123456",
+      "Agus Setiawan, S.Si.",
+      "Quality Assurance PIC",
+      "Quality Assurance",
+      "Technical & QA",
+      "DEPARTMENT",
+      "Quality Assurance",
+      "ACTIVE",
+      "agus.setiawan@ajinomoto.co.id",
+      "0815-6789-0123",
+      "121803119",
+      "Penanggung Jawab Kompetensi Analis & Matriks Laboratorium Quality Assurance & Control.",
+      "TRUE",
+      "FALSE",
+      "",
+      new Date().toISOString()
+    ],
+    [
+      5,
+      "eng_supervisor",
+      "eng12345",
+      "Hendra Wijaya",
+      "Section Supervisor Maintenance",
+      "Engineering & Maintenance",
+      "Engineering & Utility",
+      "DEPARTMENT",
+      "Engineering & Maintenance",
+      "ACTIVE",
+      "hendra.wijaya@ajinomoto.co.id",
+      "0821-4567-8901",
+      "121702088",
+      "Supervisor Divisi Pemeliharaan Mesin & Utilitas Pabrik Ajinomoto Mojokerto.",
+      "TRUE",
+      "FALSE",
+      "",
+      new Date().toISOString()
+    ],
+    [
+      6,
+      "mgmt_viewer",
+      "viewer123",
+      "Ir. Haryono",
+      "Executive Management Auditor",
+      "Factory Executive Office",
+      "Factory Management",
+      "ALL",
+      "Semua Departemen",
+      "ACTIVE",
+      "haryono.exec@ajinomoto.co.id",
+      "0811-2233-4455",
+      "119801001",
+      "Pemantau Eksekutif KPI Matriks Multi-Skill dan Kesiapan Kompetensi Tenaga Kerja Pabrik.",
+      "FALSE",
+      "FALSE",
+      "",
+      new Date().toISOString()
+    ]
+  ];
+  
+  // Tulis data sampel
+  sheet.getRange(2, 1, sampleUsers.length, headers.length).setValues(sampleUsers);
+  
+  // Auto-fit kolom
+  for (var c = 1; c <= headers.length; c++) {
+    sheet.autoResizeColumn(c);
+  }
+  
+  // Validasi Dropdown Scope Type (Kolom H / 8)
+  var scopeRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(["ALL", "DIVISI", "DEPARTMENT", "PIC"], true)
+    .setAllowInvalid(false)
+    .build();
+  sheet.getRange("H2:H100").setDataValidation(scopeRule);
+  
+  // Validasi Dropdown Status (Kolom J / 10)
+  var statusRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(["ACTIVE", "INACTIVE"], true)
+    .setAllowInvalid(false)
+    .build();
+  sheet.getRange("J2:J100").setDataValidation(statusRule);
+  
+  // Validasi Boolean (Kolom O & P / 15 & 16)
+  var boolRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(["TRUE", "FALSE"], true)
+    .setAllowInvalid(false)
+    .build();
+  sheet.getRange("O2:P100").setDataValidation(boolRule);
+  
+  SpreadsheetApp.getUi().alert("Sheet Manajemen Akun Pengguna ('USER_ACCOUNTS') berhasil dibuat!");
+}
+
+/**
+ * 2. Web App API Endpoint untuk mengambil data akun secara realtime (GET)
+ */
+function doGet(e) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("USER_ACCOUNTS") || ss.getActiveSheet();
+  var data = sheet.getDataRange().getValues();
+  
+  if (data.length < 2) {
+    return ContentService.createTextOutput(JSON.stringify({ success: true, count: 0, users: [] }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+  
+  var users = [];
+  for (var r = 1; r < data.length; r++) {
+    var row = data[r];
+    if (!row[1] && !row[3]) continue;
+    
+    users.push({
+      no: row[0],
+      username: String(row[1] || '').trim(),
+      password: String(row[2] || 'password123').trim(),
+      name: String(row[3] || '').trim(),
+      role: String(row[4] || 'PIC').trim(),
+      department: String(row[5] || '').trim(),
+      divisi: String(row[6] || '').trim(),
+      scopeType: String(row[7] || 'DEPARTMENT').trim(),
+      scopeValue: String(row[8] || '').trim(),
+      status: String(row[9] || 'ACTIVE').trim(),
+      email: String(row[10] || '').trim(),
+      phone: String(row[11] || '').trim(),
+      nik: String(row[12] || '').trim(),
+      bio: String(row[13] || '').trim(),
+      canEditCompetency: String(row[14]).toUpperCase() === 'TRUE',
+      canManageUsers: String(row[15]).toUpperCase() === 'TRUE',
+      lastLogin: String(row[16] || ''),
+      updatedAt: String(row[17] || '')
+    });
+  }
+  
+  return ContentService.createTextOutput(JSON.stringify({
+    success: true,
+    sheet: "USER_ACCOUNTS",
+    count: users.length,
+    timestamp: new Date().toISOString(),
+    users: users
+  })).setMimeType(ContentService.MimeType.JSON);
+}
+`;
+}
+
+/**
+ * Download sample CSV template for User Accounts Management
+ */
+export function downloadSampleUsersCsv(): void {
+  const headers = [
+    'No',
+    'Username',
+    'Password',
+    'Nama Lengkap',
+    'Role / Hak Akses',
+    'Departemen',
+    'Divisi',
+    'Scope Type',
+    'Scope Value',
+    'Status',
+    'Email',
+    'No Telepon',
+    'NIK',
+    'Bio',
+    'Can Edit Competency',
+    'Can Manage Users'
   ];
 
-  const sampleRow2 = [
-    '2', 'AJN-MJK-0103', 'Budi Santoso', 'Produksi MSG & Seasoning', 'Fermentation Department',
-    'Sterile Systems', 'ST4', 'JG-06', 'Line Leader Inoculum', 'L', '10 Mei 2045', 'Siti Nurhaliza', '2026', '8',
-    '1', '1', '1', '0', '1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0'
+  const sample1 = [
+    '1',
+    'hr_admin',
+    'password123',
+    'Mahmud Nurdiansyah',
+    'HR Development Admin',
+    'Human Resources Development',
+    'Human Resources & Corporate Service',
+    'ALL',
+    'Semua Departemen',
+    'ACTIVE',
+    'mahmudnurdiansyah4@gmail.com',
+    '0819-1932-7912',
+    '122108091',
+    'Super Administrator Multi-Skill Monitoring Ajinomoto Mojokerto',
+    'TRUE',
+    'TRUE'
+  ];
+
+  const sample2 = [
+    '2',
+    'fermentasi_pic',
+    'fermentasi123',
+    'Budi Santoso, S.T.',
+    'PIC Departemen Fermentasi',
+    'Fermentation Department',
+    'Production FI (MSG)',
+    'DEPARTMENT',
+    'Fermentation Department',
+    'ACTIVE',
+    'budi.santoso@ajinomoto.co.id',
+    '0812-3456-7890',
+    '121904102',
+    'PIC Matriks Multi-Skill Bagian Fermentasi',
+    'TRUE',
+    'FALSE'
   ];
 
   const csvContent = [
-    sampleHeaders.join(','),
-    sampleRow1.join(','),
-    sampleRow2.join(',')
+    headers.join(','),
+    sample1.join(','),
+    sample2.join(',')
   ].join('\r\n');
 
   const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `Template_Import_MultiSkill_Ajinomoto.csv`;
+  a.download = `Template_User_Accounts_Ajinomoto.csv`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
+
+/**
+ * Generate Supabase SQL DDL specifically for users table
+ */
+export function generateSupabaseSqlForUsersTable(): string {
+  return generateSupabaseSqlTable('employees_multi_skill');
+}
+
+/**
+ * Download sample CSV template for Employees Multi-Skill matrix import
+ */
+export function downloadSampleImportCsv(): void {
+  const headers = [
+    'No',
+    'EMP ID',
+    'Nama Karyawan',
+    'Divisi',
+    'Departemen',
+    'Section',
+    'Grade',
+    'Job Grade',
+    'Jabatan',
+    'Gender',
+    'Tanggal Pensiun',
+    'PIC',
+    'Tahun',
+    'Bulan',
+    'FI-1 / H-1',
+    'FI-1 / H-2',
+    'FI-1 / H-4',
+    'FI-1 / H-5,6',
+    'FI-2 / Production',
+    'FI-2 / Supporting',
+    'FP-1 / EMP',
+    'FP-1 / Masako Bulk',
+    'FP-1 / Liquid',
+    'FP-2 / Packaging',
+    'FP-2 / Warehouse',
+    'QC / Chemical Analysis',
+    'QC / Microbiology',
+    'QA / Food Safety',
+    'Engineering / Mechanical',
+    'Engineering / Electrical',
+    'Engineering / Automation & PLC',
+    'Utility / Boiler & Steam',
+    'Utility / Water Treatment (WTP)',
+    'Utility / Waste Water (WWTP)',
+    'HSE / K3 & Environmental'
+  ];
+
+  const sample1 = [
+    '1',
+    '122108091',
+    'Mahmud Nurdiansyah',
+    'Production FI (MSG)',
+    'Fermentation Department',
+    'Section Fermentasi Utama',
+    'IV-A',
+    'Senior Operator',
+    'Leader Line Fermentation',
+    'L',
+    '2045-12-31',
+    'Budi Santoso',
+    '2026',
+    '2',
+    '1', '1', '1', '1', '1', '0', '0', '0', '0', '0', '0', '0', '0', '0', '1', '0', '0', '0', '0', '0', '1'
+  ];
+
+  const sample2 = [
+    '2',
+    '122005214',
+    'Siti Rahmawati',
+    'Production FP (Food Products)',
+    'Packaging Department',
+    'Section Packing Masako',
+    'III-B',
+    'Operator',
+    'Operator Packaging Line',
+    'P',
+    '2048-06-15',
+    'Siti Rahmawati',
+    '2026',
+    '2',
+    '0', '0', '0', '0', '0', '0', '1', '1', '1', '1', '0', '0', '0', '1', '0', '0', '0', '0', '0', '0', '1'
+  ];
+
+  const csvContent = [
+    headers.join(','),
+    sample1.join(','),
+    sample2.join(',')
+  ].join('\r\n');
+
+  const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `Ajinomoto_MultiSkill_Template_Data.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+

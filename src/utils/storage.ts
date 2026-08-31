@@ -31,6 +31,11 @@ import {
   saveEmployeesToServer,
   fetchEmployeesFromServer
 } from './systemDbService';
+import {
+  getSupabaseConfig,
+  fetchSupabaseUsers,
+  authenticateUserSupabase
+} from './syncService';
 
 export { calculateEmployeeScore };
 import { jsPDF } from 'jspdf';
@@ -131,50 +136,74 @@ export function saveStoredUsers(users: UserAccount[]): void {
 }
 
 /**
- * Synchronize users and system settings from Server Database.
+ * Synchronize users and system settings from Supabase & Server Database.
  * Runs on boot and on demand to guarantee instant cross-incognito profile restoration.
  */
 export async function syncSystemFromBackend(): Promise<{ users: UserAccount[]; config?: SystemConfig } | null> {
+  let syncedUsers: UserAccount[] = [];
+  let systemConfig: SystemConfig | undefined;
+
+  // 1. Check Supabase first for absolute cloud persistence across browsers/sessions
+  try {
+    const sbConfig = getSupabaseConfig();
+    if (sbConfig && sbConfig.url && sbConfig.anonKey) {
+      const sbUsersRes = await fetchSupabaseUsers(sbConfig);
+      if (sbUsersRes.success && sbUsersRes.users && sbUsersRes.users.length > 0) {
+        syncedUsers = sbUsersRes.users;
+        saveStoredUsers(syncedUsers);
+      }
+    }
+  } catch (sbErr) {
+    console.warn('Supabase initial user sync note:', sbErr);
+  }
+
+  // 2. Also fetch from Server Database (/api/system/init)
   try {
     const initData = await fetchSystemInit();
-    if (initData && initData.users && initData.users.length > 0) {
-      saveStoredUsers(initData.users);
-
-      // If active session exists, refresh with latest profile details from server
-      const currentSession = getStoredSession();
-      const targetUser = currentSession?.username
-        ? initData.users.find((u) => u.username.trim().toLowerCase() === currentSession.username.trim().toLowerCase())
-        : (initData.users.find((u) => u.username.trim().toLowerCase() === 'hr_admin') || initData.users[0]);
-
-      if (targetUser) {
-        const refreshedSession: UserSession = {
-          username: targetUser.username,
-          name: targetUser.name || 'Mahmud Nurdiansyah',
-          role: targetUser.role || 'HR Development Admin',
-          department: targetUser.department || 'Human Resources Development',
-          divisi: targetUser.divisi || '',
-          scopeType: targetUser.scopeType || 'ALL',
-          scopeValue: targetUser.scopeValue || '',
-          status: targetUser.status || 'ACTIVE',
-          email: targetUser.email || 'mahmudnurdiansyah4@gmail.com',
-          phone: targetUser.phone || '0819-1932-7912',
-          nik: targetUser.nik || '122108091',
-          avatarUrl: targetUser.avatarUrl || '',
-          bio: targetUser.bio || 'Administrator Multi-Skill Monitoring & Pengembangan Kompetensi Karyawan PT Ajinomoto Indonesia Mojokerto Factory.',
-          canEditCompetency: targetUser.canEditCompetency !== undefined ? targetUser.canEditCompetency : true,
-          canManageUsers: targetUser.canManageUsers !== undefined ? targetUser.canManageUsers : (targetUser.username === 'hr_admin'),
-          token: currentSession?.token || 'tok_admin_' + Date.now()
-        };
-        saveStoredSession(refreshedSession);
+    if (initData) {
+      systemConfig = initData.config;
+      if (syncedUsers.length === 0 && initData.users && initData.users.length > 0) {
+        syncedUsers = initData.users;
+        saveStoredUsers(syncedUsers);
       }
-
-      return { users: initData.users, config: initData.config };
     }
-    return null;
   } catch (err) {
-    console.warn('System sync from backend skipped:', err);
-    return null;
+    console.warn('System init from backend skipped:', err);
   }
+
+  if (syncedUsers.length > 0) {
+    // If active session exists, refresh with latest profile details
+    const currentSession = getStoredSession();
+    const targetUser = currentSession?.username
+      ? syncedUsers.find((u) => u.username.trim().toLowerCase() === currentSession.username.trim().toLowerCase())
+      : (syncedUsers.find((u) => u.username.trim().toLowerCase() === 'hr_admin') || syncedUsers[0]);
+
+    if (targetUser) {
+      const refreshedSession: UserSession = {
+        username: targetUser.username,
+        name: targetUser.name || 'Mahmud Nurdiansyah',
+        role: targetUser.role || 'HR Development Admin',
+        department: targetUser.department || 'Human Resources Development',
+        divisi: targetUser.divisi || '',
+        scopeType: targetUser.scopeType || 'ALL',
+        scopeValue: targetUser.scopeValue || '',
+        status: targetUser.status || 'ACTIVE',
+        email: targetUser.email || 'mahmudnurdiansyah4@gmail.com',
+        phone: targetUser.phone || '0819-1932-7912',
+        nik: targetUser.nik || '122108091',
+        avatarUrl: targetUser.avatarUrl || '',
+        bio: targetUser.bio || 'Administrator Multi-Skill Monitoring & Pengembangan Kompetensi Karyawan PT Ajinomoto Indonesia Mojokerto Factory.',
+        canEditCompetency: targetUser.canEditCompetency !== undefined ? targetUser.canEditCompetency : true,
+        canManageUsers: targetUser.canManageUsers !== undefined ? targetUser.canManageUsers : (targetUser.username === 'hr_admin'),
+        token: currentSession?.token || 'tok_admin_' + Date.now()
+      };
+      saveStoredSession(refreshedSession);
+    }
+
+    return { users: syncedUsers, config: systemConfig };
+  }
+
+  return null;
 }
 
 export function getStoredSession(): UserSession | null {
@@ -213,14 +242,63 @@ export function clearSession(): void {
 }
 
 /**
- * Check Login with Server Authentication first, seamless fallback to local cache
+ * Check Login with Supabase & Server Authentication first, seamless fallback to local cache
  */
 export async function checkLoginAsync(
   username: string,
   password: string
 ): Promise<{ success: boolean; message?: string; session?: UserSession }> {
   const cleanUsername = username.trim();
+
+  // 1. Try Supabase Authentication first if configured
+  try {
+    const sbConfig = getSupabaseConfig();
+    if (sbConfig && sbConfig.url && sbConfig.anonKey) {
+      const sbAuth = await authenticateUserSupabase(sbConfig, cleanUsername, password);
+      if (sbAuth.success && sbAuth.user) {
+        const u = sbAuth.user;
+        const session: UserSession = {
+          username: u.username,
+          name: u.name || u.username,
+          role: u.role || 'User',
+          department: u.department || '',
+          divisi: u.divisi || '',
+          scopeType: u.scopeType || 'ALL',
+          scopeValue: u.scopeValue || '',
+          status: u.status || 'ACTIVE',
+          email: u.email || '',
+          phone: u.phone || '',
+          nik: u.nik || '',
+          avatarUrl: u.avatarUrl || '',
+          bio: u.bio || '',
+          signatureImage: u.signatureImage || '',
+          canEditCompetency: u.canEditCompetency !== undefined ? u.canEditCompetency : true,
+          canManageUsers: u.canManageUsers !== undefined ? u.canManageUsers : (u.username.toLowerCase() === 'hr_admin'),
+          token: 'tok_sb_' + Date.now()
+        };
+        saveStoredSession(session);
+
+        // Update local users cache
+        const users = getStoredUsers();
+        const idx = users.findIndex((existing) => existing.username.trim().toLowerCase() === u.username.trim().toLowerCase());
+        if (idx !== -1) {
+          users[idx] = { ...users[idx], ...u };
+        } else {
+          users.push(u);
+        }
+        saveStoredUsers(users);
+
+        return { success: true, session };
+      } else if (sbAuth.message && !sbAuth.message.includes('tidak terhubung')) {
+        // Explicit rejection from Supabase (e.g. wrong password or inactive)
+        return { success: false, message: sbAuth.message };
+      }
+    }
+  } catch (sbErr) {
+    console.warn('Supabase login check skipped:', sbErr);
+  }
   
+  // 2. Try Server backend
   try {
     const serverRes = await serverLogin(cleanUsername, password);
     if (serverRes.success && serverRes.session) {
@@ -244,7 +322,7 @@ export async function checkLoginAsync(
     console.warn('Backend login attempt encountered an exception, proceeding with local fallback:', err);
   }
 
-  // Fallback to local authentication
+  // 3. Fallback to local authentication
   const localRes = checkLogin(cleanUsername, password);
   if (localRes.success) {
     return localRes;

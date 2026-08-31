@@ -51,6 +51,7 @@ export interface UserSession {
   nik?: string;
   avatarUrl?: string;
   bio?: string;
+  signatureImage?: string;
   token?: string;
   canEditCompetency?: boolean;
   canManageUsers?: boolean;
